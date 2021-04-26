@@ -9,6 +9,7 @@ import (
 	"github.com/fleetdm/fleet/server/contexts/viewer"
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/fleetdm/fleet/server/mail"
+	"github.com/kolide/kit/version"
 	"github.com/pkg/errors"
 )
 
@@ -138,6 +139,9 @@ func appConfigFromAppConfigPayload(p kolide.AppConfigPayload, config kolide.AppC
 		if p.SSOSettings.EnableSSO != nil {
 			config.EnableSSO = *p.SSOSettings.EnableSSO
 		}
+		if p.SSOSettings.EnableSSOIdPLogin != nil {
+			config.EnableSSOIdPLogin = *p.SSOSettings.EnableSSOIdPLogin
+		}
 		if p.SSOSettings.EntityID != nil {
 			config.EntityID = *p.SSOSettings.EntityID
 		}
@@ -241,9 +245,23 @@ func appConfigFromAppConfigPayload(p kolide.AppConfigPayload, config kolide.AppC
 }
 
 func (svc service) ApplyEnrollSecretSpec(ctx context.Context, spec *kolide.EnrollSecretSpec) error {
+	for _, s := range spec.Secrets {
+		if s.Name == "" {
+			return errors.New("enroll secret name must not be empty")
+		}
+		if s.Secret == "" {
+			return errors.New("enroll secret must not be empty")
+		}
+	}
+
 	return svc.ds.ApplyEnrollSecretSpec(spec)
 }
 
 func (svc service) GetEnrollSecretSpec(ctx context.Context) (*kolide.EnrollSecretSpec, error) {
 	return svc.ds.GetEnrollSecretSpec()
+}
+
+func (svc service) Version(ctx context.Context) (*version.Info, error) {
+	info := version.Version()
+	return &info, nil
 }

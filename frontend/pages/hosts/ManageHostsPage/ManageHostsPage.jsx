@@ -1,77 +1,61 @@
-import React, { PureComponent } from 'react';
-import PropTypes from 'prop-types';
-import AceEditor from 'react-ace';
-import { connect } from 'react-redux';
-import { push } from 'react-router-redux';
-import { sortBy } from 'lodash';
+import React, { PureComponent } from "react";
+import PropTypes from "prop-types";
+import AceEditor from "react-ace";
+import { connect } from "react-redux";
+import { push } from "react-router-redux";
+import { sortBy } from "lodash";
 
-import AddHostModal from 'components/hosts/AddHostModal';
-import Button from 'components/buttons/Button';
-import configInterface from 'interfaces/config';
-import HostContainer from 'components/hosts/HostContainer';
-import HostPagination from 'components/hosts/HostPagination';
-import HostSidePanel from 'components/side_panels/HostSidePanel';
-import LabelForm from 'components/forms/LabelForm';
-import Modal from 'components/modals/Modal';
-import QuerySidePanel from 'components/side_panels/QuerySidePanel';
-import labelInterface from 'interfaces/label';
-import hostInterface from 'interfaces/host';
-import osqueryTableInterface from 'interfaces/osquery_table';
-import statusLabelsInterface from 'interfaces/status_labels';
-import enrollSecretInterface from 'interfaces/enroll_secret';
-import { selectOsqueryTable } from 'redux/nodes/components/QueryPages/actions';
-import {
-  getStatusLabelCounts,
-  setPagination,
-} from 'redux/nodes/components/ManageHostsPage/actions';
-import hostActions from 'redux/nodes/entities/hosts/actions';
-import labelActions from 'redux/nodes/entities/labels/actions';
-import { renderFlash } from 'redux/nodes/notifications/actions';
-import entityGetter from 'redux/utilities/entityGetter';
-import PATHS from 'router/paths';
-import deepDifference from 'utilities/deep_difference';
-import scrollToTop from 'utilities/scroll_to_top';
-import helpers from './helpers';
+import AddHostModal from "components/hosts/AddHostModal";
+import Button from "components/buttons/Button";
+import configInterface from "interfaces/config";
+import HostSidePanel from "components/side_panels/HostSidePanel";
+import LabelForm from "components/forms/LabelForm";
+import Modal from "components/modals/Modal";
+import QuerySidePanel from "components/side_panels/QuerySidePanel";
+import labelInterface from "interfaces/label";
+import osqueryTableInterface from "interfaces/osquery_table";
+import statusLabelsInterface from "interfaces/status_labels";
+import enrollSecretInterface from "interfaces/enroll_secret";
+import { selectOsqueryTable } from "redux/nodes/components/QueryPages/actions";
+import labelActions from "redux/nodes/entities/labels/actions";
+import entityGetter from "redux/utilities/entityGetter";
+import { getLabels } from "redux/nodes/components/ManageHostsPage/actions";
+import PATHS from "router/paths";
+import deepDifference from "utilities/deep_difference";
+import HostContainer from "./components/HostContainer";
 
-const NEW_LABEL_HASH = '#new_label';
-const baseClass = 'manage-hosts';
+const NEW_LABEL_HASH = "#new_label";
+const EDIT_LABEL_HASH = "#edit_label";
+const baseClass = "manage-hosts";
 
 export class ManageHostsPage extends PureComponent {
   static propTypes = {
     config: configInterface,
     dispatch: PropTypes.func,
-    hosts: PropTypes.arrayOf(hostInterface),
     isAddLabel: PropTypes.bool,
+    isEditLabel: PropTypes.bool,
     labelErrors: PropTypes.shape({
       base: PropTypes.string,
     }),
     labels: PropTypes.arrayOf(labelInterface),
-    loadingHosts: PropTypes.bool.isRequired,
     loadingLabels: PropTypes.bool.isRequired,
     enrollSecret: enrollSecretInterface,
     selectedFilter: PropTypes.string,
     selectedLabel: labelInterface,
     selectedOsqueryTable: osqueryTableInterface,
     statusLabels: statusLabelsInterface,
-    page: PropTypes.number,
-    perPage: PropTypes.number,
   };
 
   static defaultProps = {
-    page: 1,
-    perPage: 100,
-    loadingHosts: false,
     loadingLabels: false,
   };
 
-  constructor (props) {
+  constructor(props) {
     super(props);
 
     this.state = {
-      isEditLabel: false,
-      labelQueryText: '',
+      labelQueryText: "",
       pagedHosts: [],
-      showDeleteHostModal: false,
       showAddHostModal: false,
       selectedHost: null,
       showDeleteLabelModal: false,
@@ -79,13 +63,12 @@ export class ManageHostsPage extends PureComponent {
     };
   }
 
-  componentDidMount () {
-    const { dispatch, page, perPage, selectedFilter } = this.props;
-
-    dispatch(setPagination(page, perPage, selectedFilter));
+  componentDidMount() {
+    const { dispatch } = this.props;
+    dispatch(getLabels());
   }
 
-  componentWillUnmount () {
+  componentWillUnmount() {
     this.clearHostUpdates();
     return false;
   }
@@ -93,20 +76,37 @@ export class ManageHostsPage extends PureComponent {
   onAddLabelClick = (evt) => {
     evt.preventDefault();
 
-    const { dispatch } = this.props;
-
-    dispatch(push(`${PATHS.MANAGE_HOSTS}${NEW_LABEL_HASH}`));
+    const { dispatch, selectedFilter } = this.props;
+    dispatch(push(`${PATHS.MANAGE_HOSTS}/${selectedFilter}${NEW_LABEL_HASH}`));
 
     return false;
-  }
+  };
+
+  onEditLabelClick = (evt) => {
+    evt.preventDefault();
+
+    const { dispatch, selectedFilter } = this.props;
+    console.log(selectedFilter);
+    dispatch(push(`${PATHS.MANAGE_HOSTS}/${selectedFilter}${EDIT_LABEL_HASH}`));
+
+    return false;
+  };
 
   onCancelAddLabel = () => {
-    const { dispatch } = this.props;
+    const { dispatch, selectedFilter } = this.props;
 
-    dispatch(push(PATHS.MANAGE_HOSTS));
+    dispatch(push(`${PATHS.MANAGE_HOSTS}/${selectedFilter}`));
 
     return false;
-  }
+  };
+
+  onCancelEditLabel = () => {
+    const { dispatch, selectedFilter } = this.props;
+
+    dispatch(push(`${PATHS.MANAGE_HOSTS}/${selectedFilter}`));
+
+    return false;
+  };
 
   onAddHostClick = (evt) => {
     evt.preventDefault();
@@ -115,53 +115,32 @@ export class ManageHostsPage extends PureComponent {
     toggleAddHostModal();
 
     return false;
-  }
-
-  onDestroyHost = (evt) => {
-    evt.preventDefault();
-
-    const { dispatch } = this.props;
-    const { selectedHost } = this.state;
-
-    dispatch(hostActions.destroy(selectedHost))
-      .then(() => {
-        this.toggleDeleteHostModal(null)();
-
-        dispatch(getStatusLabelCounts);
-        dispatch(renderFlash('success', `Host "${selectedHost.hostname}" was successfully deleted`));
-      });
-
-    return false;
-  }
+  };
 
   onEditLabel = (formData) => {
-    const { dispatch, selectedLabel } = this.props;
+    const { dispatch, selectedLabel, selectedFilter } = this.props;
     const updateAttrs = deepDifference(formData, selectedLabel);
 
     return dispatch(labelActions.update(selectedLabel, updateAttrs))
       .then(() => {
-        this.toggleEditLabel();
+        dispatch(push(`${PATHS.MANAGE_HOSTS}/${selectedFilter}`));
 
         return false;
       })
       .catch(() => false);
-  }
+  };
 
   onLabelClick = (selectedLabel) => {
     return (evt) => {
       evt.preventDefault();
-      const { dispatch, perPage } = this.props;
+      const { dispatch } = this.props;
       const { MANAGE_HOSTS } = PATHS;
       const { slug, type } = selectedLabel;
-      const nextLocation = type === 'all' ? MANAGE_HOSTS : `${MANAGE_HOSTS}/${slug}`;
-
+      const nextLocation =
+        type === "all" ? MANAGE_HOSTS : `${MANAGE_HOSTS}/${slug}`;
       dispatch(push(nextLocation));
-
-      dispatch(setPagination(1, perPage, selectedLabel.slug));
-
-      return false;
     };
-  }
+  };
 
   onOsqueryTableSelect = (tableName) => {
     const { dispatch } = this.props;
@@ -169,108 +148,55 @@ export class ManageHostsPage extends PureComponent {
     dispatch(selectOsqueryTable(tableName));
 
     return false;
-  }
-
-  onPaginationChange = (page) => {
-    const { dispatch, selectedFilter, perPage } = this.props;
-
-    dispatch(setPagination(page, perPage, selectedFilter));
-
-    scrollToTop();
-
-    return true;
-  }
+  };
 
   onSaveAddLabel = (formData) => {
     const { dispatch } = this.props;
 
-    return dispatch(labelActions.create(formData))
-      .then(() => {
-        dispatch(push(PATHS.MANAGE_HOSTS));
+    return dispatch(labelActions.create(formData)).then(() => {
+      dispatch(push(PATHS.MANAGE_HOSTS));
 
-        return false;
-      });
-  }
+      return false;
+    });
+  };
 
   onDeleteLabel = () => {
     const { toggleDeleteLabelModal } = this;
     const { dispatch, selectedLabel } = this.props;
     const { MANAGE_HOSTS } = PATHS;
 
-    return dispatch(labelActions.destroy(selectedLabel))
-      .then(() => {
-        toggleDeleteLabelModal();
-        dispatch(push(MANAGE_HOSTS));
-        return false;
-      });
-  }
-
-  onQueryHost = (host) => {
-    return (evt) => {
-      evt.preventDefault();
-
-      const { dispatch } = this.props;
-      const { NEW_QUERY } = PATHS;
-
-      dispatch(push({
-        pathname: NEW_QUERY,
-        query: { host_ids: [host.id] },
-      }));
-
+    return dispatch(labelActions.destroy(selectedLabel)).then(() => {
+      toggleDeleteLabelModal();
+      dispatch(push(MANAGE_HOSTS));
       return false;
-    };
-  }
+    });
+  };
 
-  clearHostUpdates () {
+  clearHostUpdates() {
     if (this.timeout) {
       global.window.clearTimeout(this.timeout);
       this.timeout = null;
     }
   }
 
-  filterAllHosts = (hosts, selectedLabel) => {
-    const { filterHosts } = helpers;
-
-    return filterHosts(hosts, selectedLabel);
-  }
-
   sortHosts = (hosts) => {
-    return sortBy(hosts, (h) => { return h.hostname; });
-  }
+    return sortBy(hosts, (h) => {
+      return h.hostname;
+    });
+  };
 
   toggleAddHostModal = () => {
     const { showAddHostModal } = this.state;
     this.setState({ showAddHostModal: !showAddHostModal });
     return false;
-  }
-
-  toggleDeleteHostModal = (selectedHost) => {
-    return () => {
-      const { showDeleteHostModal } = this.state;
-
-      this.setState({
-        selectedHost,
-        showDeleteHostModal: !showDeleteHostModal,
-      });
-
-      return false;
-    };
-  }
+  };
 
   toggleDeleteLabelModal = () => {
     const { showDeleteLabelModal } = this.state;
 
     this.setState({ showDeleteLabelModal: !showDeleteLabelModal });
     return false;
-  }
-
-  toggleEditLabel = () => {
-    const { isEditLabel } = this.state;
-
-    this.setState({ isEditLabel: !isEditLabel });
-
-    return false;
-  }
+  };
 
   renderAddHostModal = () => {
     const { toggleAddHostModal } = this;
@@ -294,31 +220,7 @@ export class ManageHostsPage extends PureComponent {
         />
       </Modal>
     );
-  }
-
-  renderDeleteHostModal = () => {
-    const { showDeleteHostModal, selectedHost } = this.state;
-    const { toggleDeleteHostModal, onDestroyHost } = this;
-
-    if (!showDeleteHostModal) {
-      return false;
-    }
-
-    return (
-      <Modal
-        title="Delete Host"
-        onExit={toggleDeleteHostModal(null)}
-        className={`${baseClass}__modal`}
-      >
-        <p>This action will delete the host <strong>{selectedHost.hostname}</strong> from your Fleet instance.</p>
-        <p>If the host comes back online it will automatically re-enroll. To prevent the host from re-enrolling please disable or uninstall osquery on the host.</p>
-        <div className={`${baseClass}__modal-buttons`}>
-          <Button onClick={onDestroyHost} variant="alert">Delete</Button>
-          <Button onClick={toggleDeleteHostModal(null)} variant="inverse">Cancel</Button>
-        </div>
-      </Modal>
-    );
-  }
+  };
 
   renderDeleteLabelModal = () => {
     const { showDeleteLabelModal } = this.state;
@@ -336,40 +238,55 @@ export class ManageHostsPage extends PureComponent {
       >
         <p>Are you sure you wish to delete this label?</p>
         <div className={`${baseClass}__modal-buttons`}>
-          <Button onClick={onDeleteLabel} variant="alert">Delete</Button>
-          <Button onClick={toggleDeleteLabelModal} variant="inverse">Cancel</Button>
+          <Button onClick={toggleDeleteLabelModal} variant="inverse">
+            Cancel
+          </Button>
+          <Button onClick={onDeleteLabel} variant="alert">
+            Delete
+          </Button>
         </div>
       </Modal>
     );
-  }
+  };
 
   renderDeleteButton = () => {
-    const { toggleDeleteLabelModal, toggleEditLabel } = this;
-    const { selectedLabel: { type } } = this.props;
+    const { toggleDeleteLabelModal, onEditLabelClick } = this;
+    const {
+      selectedLabel: { type },
+    } = this.props;
 
-    if (type !== 'custom') {
+    if (type !== "custom") {
       return false;
     }
 
     return (
       <div className={`${baseClass}__label-actions`}>
-        <Button onClick={toggleEditLabel} variant="inverse">Edit</Button>
-        <Button onClick={toggleDeleteLabelModal} variant="inverse">Delete</Button>
+        <Button onClick={onEditLabelClick} variant="inverse">
+          Edit
+        </Button>
+        <Button onClick={toggleDeleteLabelModal} variant="inverse">
+          Delete
+        </Button>
       </div>
     );
-  }
+  };
 
   renderQuery = () => {
     const { selectedLabel } = this.props;
-    const { slug, label_type: labelType, label_membership_type: membershipType, query } = selectedLabel;
+    const {
+      slug,
+      label_type: labelType,
+      label_membership_type: membershipType,
+      query,
+    } = selectedLabel;
 
-    if (membershipType === 'manual' && labelType !== 'builtin') {
+    if (membershipType === "manual" && labelType !== "builtin") {
       return (
         <h4 title="Manage manual labels with fleetctl">Manually managed</h4>
       );
     }
 
-    if (!query || slug === 'all-hosts') {
+    if (!query || slug === "all-hosts") {
       return false;
     }
 
@@ -390,21 +307,19 @@ export class ManageHostsPage extends PureComponent {
         fontSize={14}
       />
     );
-  }
+  };
 
   renderHeader = () => {
     const { renderDeleteButton } = this;
-    const { isAddLabel, selectedLabel, statusLabels } = this.props;
+    const { isAddLabel, selectedLabel } = this.props;
 
     if (!selectedLabel || isAddLabel) {
       return false;
     }
 
-    const { count, description, display_text: displayText, statusLabelKey, type } = selectedLabel;
+    const { description, display_text: displayText } = selectedLabel;
 
-    const hostCount = type === 'status' ? statusLabels[`${statusLabelKey}`] : count;
-    const hostsTotalDisplay = hostCount === 1 ? '1 host' : `${hostCount} hosts`;
-    const defaultDescription = 'No description available.';
+    const defaultDescription = "No description available.";
 
     return (
       <div className={`${baseClass}__header`}>
@@ -415,24 +330,20 @@ export class ManageHostsPage extends PureComponent {
           <div className={`${baseClass}__description`}>
             <p>{description || <em>{defaultDescription}</em>}</p>
           </div>
-          <div className={`${baseClass}__topper`}>
-            <p className={`${baseClass}__host-count`}>{hostsTotalDisplay}</p>
-          </div>
         </div>
         {renderDeleteButton()}
       </div>
     );
-  }
+  };
 
   renderForm = () => {
-    const { isAddLabel, labelErrors, selectedLabel } = this.props;
-    const { isEditLabel } = this.state;
+    const { isAddLabel, isEditLabel, labelErrors, selectedLabel } = this.props;
     const {
       onCancelAddLabel,
+      onCancelEditLabel,
       onEditLabel,
       onOsqueryTableSelect,
       onSaveAddLabel,
-      toggleEditLabel,
     } = this;
 
     if (isAddLabel) {
@@ -453,7 +364,7 @@ export class ManageHostsPage extends PureComponent {
         <div className="body-wrap">
           <LabelForm
             formData={selectedLabel}
-            onCancel={toggleEditLabel}
+            onCancel={onCancelEditLabel}
             onOsqueryTableSelect={onOsqueryTableSelect}
             handleSubmit={onEditLabel}
             isEdit
@@ -464,7 +375,7 @@ export class ManageHostsPage extends PureComponent {
     }
 
     return false;
-  }
+  };
 
   renderSidePanel = () => {
     let SidePanel;
@@ -499,98 +410,54 @@ export class ManageHostsPage extends PureComponent {
     }
 
     return SidePanel;
-  }
+  };
 
-  render () {
+  render() {
     const {
-      onQueryHost,
-      onPaginationChange,
       renderForm,
       renderHeader,
       renderSidePanel,
       renderAddHostModal,
-      renderDeleteHostModal,
       renderDeleteLabelModal,
       renderQuery,
-      toggleAddHostModal,
-      toggleDeleteHostModal,
     } = this;
     const {
-      page,
-      perPage,
-      hosts,
       isAddLabel,
+      isEditLabel,
       loadingLabels,
-      loadingHosts,
       selectedLabel,
-      statusLabels,
+      selectedFilter,
     } = this.props;
-    const { isEditLabel } = this.state;
 
     const { onAddHostClick } = this;
-
-    const sortedHosts = this.sortHosts(hosts);
-
-
-    let hostCount = 0;
-    if (hostCount === 0) {
-      switch (selectedLabel ? selectedLabel.id : '') {
-        case 'all-hosts':
-          hostCount = statusLabels.total_count;
-          break;
-        case 'new':
-          hostCount = statusLabels.new_count;
-          break;
-        case 'online':
-          hostCount = statusLabels.online_count;
-          break;
-        case 'offline':
-          hostCount = statusLabels.offline_count;
-          break;
-        case 'mia':
-          hostCount = statusLabels.mia_count;
-          break;
-        default:
-          hostCount = selectedLabel ? selectedLabel.count : 0;
-          break;
-      }
-    }
 
     return (
       <div className="has-sidebar">
         {renderForm()}
 
-        {!isAddLabel && !isEditLabel &&
+        {!isAddLabel && !isEditLabel && (
           <div className={`${baseClass} body-wrap`}>
             <div className="header-wrap">
               {renderHeader()}
-              <Button onClick={onAddHostClick} className={`${baseClass}__add-hosts button button--brand`}>
+              <Button
+                onClick={onAddHostClick}
+                className={`${baseClass}__add-hosts button button--brand`}
+              >
                 <span>Add new host</span>
               </Button>
             </div>
             {selectedLabel && renderQuery()}
             <div className={`${baseClass}__list`}>
               <HostContainer
-                hosts={sortedHosts}
+                selectedFilter={selectedFilter}
                 selectedLabel={selectedLabel}
-                loadingHosts={loadingHosts}
-                toggleAddHostModal={toggleAddHostModal}
-                toggleDeleteHostModal={toggleDeleteHostModal}
-                onQueryHost={onQueryHost}
               />
-              {!loadingHosts && <HostPagination
-                allHostCount={hostCount}
-                currentPage={page}
-                hostsPerPage={perPage}
-                onPaginationChange={onPaginationChange}
-              />}
             </div>
           </div>
-        }
+        )}
 
         {!loadingLabels && renderSidePanel()}
         {renderAddHostModal()}
-        {renderDeleteHostModal()}
         {renderDeleteLabelModal()}
       </div>
     );
@@ -599,33 +466,29 @@ export class ManageHostsPage extends PureComponent {
 
 const mapStateToProps = (state, { location, params }) => {
   const { active_label: activeLabel, label_id: labelID } = params;
-  const activeLabelSlug = activeLabel || 'all-hosts';
+  const activeLabelSlug = activeLabel || "all-hosts";
   const selectedFilter = labelID ? `labels/${labelID}` : activeLabelSlug;
 
-  const { status_labels: statusLabels, page, perPage } = state.components.ManageHostsPage;
-  const { entities: hosts } = entityGetter(state).get('hosts');
-  const labelEntities = entityGetter(state).get('labels');
+  const { status_labels: statusLabels } = state.components.ManageHostsPage;
+  const labelEntities = entityGetter(state).get("labels");
   const { entities: labels } = labelEntities;
   const isAddLabel = location.hash === NEW_LABEL_HASH;
+  const isEditLabel = location.hash === EDIT_LABEL_HASH;
   const selectedLabel = labelEntities.findBy(
     { slug: selectedFilter },
-    { ignoreCase: true },
+    { ignoreCase: true }
   );
   const { selectedOsqueryTable } = state.components.QueryPages;
   const { errors: labelErrors, loading: loadingLabels } = state.entities.labels;
-  const { loading: loadingHosts } = state.entities.hosts;
   const enrollSecret = state.app.enrollSecret;
   const config = state.app.config;
 
   return {
     selectedFilter,
-    page,
-    perPage,
-    hosts,
     isAddLabel,
+    isEditLabel,
     labelErrors,
     labels,
-    loadingHosts,
     loadingLabels,
     enrollSecret,
     selectedLabel,

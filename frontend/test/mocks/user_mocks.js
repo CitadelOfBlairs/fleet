@@ -1,13 +1,13 @@
-import createRequestMock from 'test/mocks/create_request_mock';
-import { userStub } from 'test/stubs';
+import createRequestMock from "test/mocks/create_request_mock";
+import { userStub } from "test/stubs";
 
 export default {
   changePassword: {
     valid: (bearerToken, params) => {
       return createRequestMock({
         bearerToken,
-        endpoint: '/api/v1/kolide/change_password',
-        method: 'post',
+        endpoint: "/api/v1/fleet/change_password",
+        method: "post",
         params,
         response: {},
       });
@@ -15,24 +15,24 @@ export default {
   },
   confirmEmailChange: {
     valid: (bearerToken, token) => {
-      const endpoint = `/api/v1/kolide/email/change/${token}`;
+      const endpoint = `/api/v1/fleet/email/change/${token}`;
 
       return createRequestMock({
         bearerToken,
         endpoint,
-        method: 'get',
-        response: { new_email: 'new@email.com' },
+        method: "get",
+        response: { new_email: "new@email.com" },
       });
     },
   },
   enable: {
     valid: (bearerToken, user, params) => {
-      const endpoint = `/api/v1/kolide/users/${user.id}/enable`;
+      const endpoint = `/api/v1/fleet/users/${user.id}/enable`;
 
       return createRequestMock({
         bearerToken,
         endpoint,
-        method: 'post',
+        method: "post",
         params,
         response: { user: { ...user, ...params } },
       });
@@ -41,16 +41,16 @@ export default {
   forgotPassword: {
     invalid: (response) => {
       return createRequestMock({
-        endpoint: '/api/v1/kolide/forgot_password',
-        method: 'post',
+        endpoint: "/api/v1/fleet/forgot_password",
+        method: "post",
         response,
         responseStatus: 422,
       });
     },
     valid: () => {
       return createRequestMock({
-        endpoint: '/api/v1/kolide/forgot_password',
-        method: 'post',
+        endpoint: "/api/v1/fleet/forgot_password",
+        method: "post",
         response: { user: userStub },
       });
     },
@@ -59,8 +59,8 @@ export default {
     valid: (bearerToken) => {
       return createRequestMock({
         bearerToken,
-        endpoint: '/api/v1/kolide/users',
-        method: 'get',
+        endpoint: "/api/v1/fleet/users",
+        method: "get",
         response: { users: [userStub] },
       });
     },
@@ -69,8 +69,8 @@ export default {
     valid: (bearerToken) => {
       return createRequestMock({
         bearerToken,
-        endpoint: '/api/v1/kolide/me',
-        method: 'get',
+        endpoint: "/api/v1/fleet/me",
+        method: "get",
         response: { user: userStub },
       });
     },
@@ -80,8 +80,8 @@ export default {
       const params = { new_password: password, password_reset_token: token };
 
       return createRequestMock({
-        endpoint: '/api/v1/kolide/reset_password',
-        method: 'post',
+        endpoint: "/api/v1/fleet/reset_password",
+        method: "post",
         params,
         response,
         responseStatus: 422,
@@ -91,8 +91,8 @@ export default {
       const params = { new_password: password, password_reset_token: token };
 
       return createRequestMock({
-        endpoint: '/api/v1/kolide/reset_password',
-        method: 'post',
+        endpoint: "/api/v1/fleet/reset_password",
+        method: "post",
         params,
         response: { user: userStub },
       });
@@ -101,8 +101,8 @@ export default {
   update: {
     valid: (user, params) => {
       return createRequestMock({
-        endpoint: `/api/v1/kolide/users/${user.id}`,
-        method: 'patch',
+        endpoint: `/api/v1/fleet/users/${user.id}`,
+        method: "patch",
         params,
         response: { user: userStub },
       });
@@ -112,8 +112,8 @@ export default {
     valid: (bearerToken, user, params) => {
       return createRequestMock({
         bearerToken,
-        endpoint: `/api/v1/kolide/users/${user.id}/admin`,
-        method: 'post',
+        endpoint: `/api/v1/fleet/users/${user.id}/admin`,
+        method: "post",
         params,
         response: { user: { ...user, ...params } },
       });

@@ -1,6 +1,8 @@
+// Fleet brand colors
 $white: #fff;
 $black: #000;
 $core-gradient: linear-gradient(360deg, #201e43 0%, #353d62 100%);
+$core-gradient-horizontal: linear-gradient(270deg, #201e43 0%, #353d62 100%);
 $core-black: #192147;
 $core-blue: #6a67fe;
 $core-blue-selected: rgba(106, 103, 254, 0.2);
@@ -15,7 +17,18 @@ $core-blue-green: #25c3ba;
 $ui-borders: #dbe3e5;
 $ui-light-grey: #fafafa;
 $ui-medium-grey: #e3e3e3;
-$warning: #ffad00;
+$ui-dark-grey: #afbec1;
+
+// Colors for over (hover) and down (active) buttons styles
+$core-red-over: #e93661;
+$core-red-down: #cb3559;
+$core-blue-over: #5855eb;
+$core-blue-down: #3f3cd4;
+$core-dark-blue-grey-over: #426186;
+$core-dark-blue-grey-down: #345073;
+$core-blue-label-over: rgba(106, 103, 254, 0.1);
+$core-blue-label-down: rgba(106, 103, 254, 0.2);
+$core-black-over: rgba(25, 33, 71, 0.5);
 
 $alert: #ff5c83;
 $alert-light: #ffb5b2;
@@ -24,5 +37,6 @@ $core-blue-ultralight: #edd6ff;
 $button-shadow: #734893;
 $success: #27d77e;
 $success-light: #48da90;
-$warning: #f2c94c;
-$warning-light: #ffda8c;
+$warning: #fff4d8;
+$warning-border: #ffeab5;
+$info: #f1f0ff;

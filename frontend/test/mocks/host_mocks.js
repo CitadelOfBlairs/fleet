@@ -1,12 +1,12 @@
-import createRequestMock from 'test/mocks/create_request_mock';
+import createRequestMock from "test/mocks/create_request_mock";
 
 export default {
   destroy: {
     valid: (bearerToken, host) => {
       return createRequestMock({
         bearerToken,
-        endpoint: `/api/v1/kolide/hosts/${host.id}`,
-        method: 'delete',
+        endpoint: `/api/v1/fleet/hosts/${host.id}`,
+        method: "delete",
         response: {},
       });
     },
@@ -15,8 +15,17 @@ export default {
     valid: (bearerToken) => {
       return createRequestMock({
         bearerToken,
-        endpoint: '/api/v1/kolide/hosts?page=0&per_page=100&order_key=host_name',
-        method: 'get',
+        endpoint: "/api/v1/fleet/hosts?page=0&per_page=100",
+        method: "get",
+        response: { hosts: [] },
+      });
+    },
+    validWithParams: (bearerToken) => {
+      return createRequestMock({
+        bearerToken,
+        endpoint:
+          "/api/v1/fleet/hosts?page=3&per_page=100&status=new&order_key=hostname&order_direction=desc&query=testQuery",
+        method: "get",
         response: { hosts: [] },
       });
     },

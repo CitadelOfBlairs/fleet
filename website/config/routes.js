@@ -13,7 +13,7 @@ module.exports.routes = {
   //  ╦ ╦╔═╗╔╗ ╔═╗╔═╗╔═╗╔═╗╔═╗
   //  ║║║║╣ ╠╩╗╠═╝╠═╣║ ╦║╣ ╚═╗
   //  ╚╩╝╚═╝╚═╝╩  ╩ ╩╚═╝╚═╝╚═╝
-  'GET /':                   { action: 'view-homepage-or-redirect' },
+  'GET /':                   { action: 'view-homepage-or-redirect', locals: { page: 'homepage', headerClass: 'homepage-header' } },
 
   '/blog':           'https://medium.com/fleetdm',
 
@@ -22,10 +22,7 @@ module.exports.routes = {
     res.redirect('mailto:todo@example.com?subject=Pricing question&body=Please do not send this email!\n\nWe are a very young company and still working on our processes.  For now, if you have a pricing question or would like to know Fleet\'s latest pricing and support tiers, please create an issue at https://github.com/fleetdm/fleet/issues.  Thank you!');
   },
 
-  '/legal/terms':        (req, res)=>{
-    // FUTURE: page w/ our subscription terms
-    res.redirect('mailto:todo@example.com?subject=Legal question&body=Please do not send this email!\n\nWe are a very young company and still working on our processes.  For now, if you have a legal question or would like to review Fleet\'s subscription terms, please send a DM to mikermcneil or Zach Wasserman in the "osquery" Slack workspace.  Thank you!');
-  },
+  '/legal/terms': 'https://docs.google.com/document/d/1OM6YDVIs7bP8wg6iA3VG13X086r64tWDqBSRudG4a0Y/edit',
 
   '/security':       (req, res)=>{
     // FUTURE: make a page- check out how Sails does it, and also https://about.gitlab.com/security/
@@ -34,17 +31,20 @@ module.exports.routes = {
 
   '/company/about':          '/blog', // FUTURE: brief "about" page explaining the origins of the company
   '/company/stewardship':    'https://github.com/fleetdm/fleet', // FUTURE: page about how we approach open source and our commitments to the community
-  '/company/contact':        (req, res)=>{
-    // FUTURE: Page about this.  See “Contacting Fleet” in google drive for verbiage (updated holiday hours) - better to just make it all open source and check it in here.  For inspiration, see also: https://about.gitlab.com/company/contact/
-    res.redirect('mailto:todo@example.com?subject=I have a question&body=Please do not send this email!\n\nWe are a very young company and still working on our processes.  For now, if you have questions or feedback for us, please create an issue at https://github.com/fleetdm/fleet/issues.  Thank you!');
-  },
+  'GET /company/contact':    { action:   'view-contact', locals: { page: 'contact', headerClass: 'header' } },
+  'GET /get-started':    { action:   'view-get-started', locals: { page: 'get-started', headerClass: 'header' } },
+  'GET /pricing':    { action:   'view-pricing', locals: { page: 'pricing', headerClass: 'header' } },
+  '/try-fleet': '/get-started',
+  '/documentation': 'https://github.com/fleetdm/fleet/tree/master/docs',
+  '/contribute': 'https://github.com/fleetdm/fleet/tree/master/docs/3-Contribution',
+  '/hall-of-fame': 'https://github.com/fleetdm/fleet/pulse',
+
 
   // 'GET /welcome/:unused?':   { action: 'dashboard/view-welcome' },
 
   // 'GET /faq':                { action:   'view-faq' },
   // 'GET /legal/terms':        { action:   'legal/view-terms' },
   // 'GET /legal/privacy':      { action:   'legal/view-privacy' },
-  // 'GET /contact':            { action:   'view-contact' },
 
   // 'GET /signup':             { action: 'entrance/view-signup' },
   // 'GET /email/confirm':      { action: 'entrance/confirm-email' },

@@ -6,52 +6,53 @@ import (
 
 	"github.com/fleetdm/fleet/server/service"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-func setupCommand() cli.Command {
+func setupCommand() *cli.Command {
 	var (
 		flEmail    string
 		flUsername string
 		flPassword string
 		flOrgName  string
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:      "setup",
-		Usage:     "Setup a Kolide Fleet instance",
+		Usage:     "Set up a Fleet instance",
 		UsageText: `fleetctl setup [options]`,
 		Flags: []cli.Flag{
-			configFlag(),
-			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "email",
-				EnvVar:      "EMAIL",
+				EnvVars:     []string{"EMAIL"},
 				Value:       "",
 				Destination: &flEmail,
 				Usage:       "Email of the admin user to create",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "username",
-				EnvVar:      "USERNAME",
+				EnvVars:     []string{"USERNAME"},
 				Value:       "",
 				Destination: &flUsername,
 				Usage:       "Username of the admin user to create",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "password",
-				EnvVar:      "PASSWORD",
+				EnvVars:     []string{"PASSWORD"},
 				Value:       "",
 				Destination: &flPassword,
 				Usage:       "Password for the admin user (recommended to use interactive entry)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "org-name",
-				EnvVar:      "ORG_NAME",
+				EnvVars:     []string{"ORG_NAME"},
 				Value:       "",
 				Destination: &flOrgName,
 				Usage:       "Name of the organization",
 			},
+			configFlag(),
+			contextFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			fleet, err := unauthenticatedClientFromCLI(c)
@@ -96,11 +97,13 @@ func setupCommand() cli.Command {
 				return errors.Wrap(err, "error setting up Fleet")
 			}
 
-			if err := setConfigValue(c, "email", flEmail); err != nil {
+			configPath, context := c.String("config"), c.String("context")
+
+			if err := setConfigValue(configPath, context, "email", flEmail); err != nil {
 				return errors.Wrap(err, "error setting email for the current context")
 			}
 
-			if err := setConfigValue(c, "token", token); err != nil {
+			if err := setConfigValue(configPath, context, "token", token); err != nil {
 				return errors.Wrap(err, "error setting token for the current context")
 			}
 

@@ -1,23 +1,24 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import classnames from 'classnames';
-import { keys, omit } from 'lodash';
+import React, { Component } from "react";
+import PropTypes from "prop-types";
+import classnames from "classnames";
+import { keys, omit } from "lodash";
 
-import Button from 'components/buttons/Button';
-import campaignInterface from 'interfaces/campaign';
-import filterArrayByHash from 'utilities/filter_array_by_hash';
-import KolideIcon from 'components/icons/KolideIcon';
-import InputField from 'components/forms/fields/InputField';
-import QueryResultsRow from 'components/queries/QueryResultsTable/QueryResultsRow';
-import QueryProgressDetails from 'components/queries/QueryProgressDetails';
-import Spinner from 'components/loaders/Spinner';
+import Button from "components/buttons/Button";
+import campaignInterface from "interfaces/campaign";
+import filterArrayByHash from "utilities/filter_array_by_hash";
+import KolideIcon from "components/icons/KolideIcon";
+import InputField from "components/forms/fields/InputField";
+import QueryResultsRow from "components/queries/QueryResultsTable/QueryResultsRow";
+import QueryProgressDetails from "components/queries/QueryProgressDetails";
+import Spinner from "components/loaders/Spinner";
 
-const baseClass = 'query-results-table';
+const baseClass = "query-results-table";
 
 class QueryResultsTable extends Component {
   static propTypes = {
     campaign: campaignInterface.isRequired,
     onExportQueryResults: PropTypes.func,
+    onExportErrorsResults: PropTypes.func,
     onToggleQueryFullScreen: PropTypes.func,
     isQueryFullScreen: PropTypes.bool,
     isQueryShrinking: PropTypes.bool,
@@ -27,7 +28,7 @@ class QueryResultsTable extends Component {
     queryTimerMilliseconds: PropTypes.number,
   };
 
-  constructor (props) {
+  constructor(props) {
     super(props);
 
     this.state = {
@@ -48,16 +49,16 @@ class QueryResultsTable extends Component {
 
       return false;
     };
-  }
+  };
 
   onSetActiveColumn = (activeColumn) => {
     return () => {
       this.setState({ activeColumn });
     };
-  }
+  };
 
-  renderTableHeaderRowData = (column, index) => {
-    const filterable = column === 'hostname' ? 'host_hostname' : column;
+  renderTableHeaderColumn = (column, index) => {
+    const filterable = column === "hostname" ? "host_hostname" : column;
     const { activeColumn, resultsFilter } = this.state;
     const { onFilterAttribute, onSetActiveColumn } = this;
     const filterIconClassName = classnames(`${baseClass}__filter-icon`, {
@@ -66,7 +67,10 @@ class QueryResultsTable extends Component {
 
     return (
       <th key={`query-results-table-header-${index}`}>
-        <span><KolideIcon className={filterIconClassName} name="filter" />{column}</span>
+        <span>
+          <KolideIcon className={filterIconClassName} name="filter" />
+          {column}
+        </span>
         <InputField
           name={column}
           onChange={onFilterAttribute(filterable)}
@@ -75,48 +79,38 @@ class QueryResultsTable extends Component {
         />
       </th>
     );
-  }
+  };
 
-  renderTableHeaderRow = () => {
-    const { campaign } = this.props;
-    const { renderTableHeaderRowData } = this;
-    const { query_results: queryResults } = campaign;
+  renderTableHeaderRow = (rows) => {
+    const { renderTableHeaderColumn } = this;
 
-    const queryAttrs = omit(queryResults[0], ['host_hostname']);
+    const queryAttrs = omit(rows[0], ["host_hostname"]);
     const queryResultColumns = keys(queryAttrs);
 
     return (
       <tr>
-        {renderTableHeaderRowData('hostname', -1)}
+        {renderTableHeaderColumn("hostname", -1)}
         {queryResultColumns.map((column, i) => {
-          return renderTableHeaderRowData(column, i);
+          return renderTableHeaderColumn(column, i);
         })}
       </tr>
     );
-  }
+  };
 
-  renderTableRows = () => {
-    const { campaign } = this.props;
-    const { query_results: queryResults } = campaign;
+  renderTableRows = (rows) => {
     const { resultsFilter } = this.state;
-    const filteredQueryResults = filterArrayByHash(queryResults, resultsFilter);
+    const filteredRows = filterArrayByHash(rows, resultsFilter);
 
-    return filteredQueryResults.map((queryResult) => {
-      return (
-        <QueryResultsRow queryResult={queryResult} />
-      );
+    return filteredRows.map((row) => {
+      return <QueryResultsRow queryResult={row} />;
     });
-  }
+  };
 
   renderTable = () => {
-    const {
-      renderTableHeaderRow,
-      renderTableRows,
-    } = this;
+    const { renderTableHeaderRow, renderTableRows } = this;
 
     const { queryIsRunning, campaign } = this.props;
     const { query_results: queryResults } = campaign;
-
     const loading = queryIsRunning && (!queryResults || !queryResults.length);
 
     if (loading) {
@@ -125,20 +119,37 @@ class QueryResultsTable extends Component {
 
     return (
       <table className={`${baseClass}__table`}>
-        <thead>
-          {renderTableHeaderRow()}
-        </thead>
-        <tbody>
-          {renderTableRows()}
-        </tbody>
+        <thead>{renderTableHeaderRow(queryResults)}</thead>
+        <tbody>{renderTableRows(queryResults)}</tbody>
       </table>
     );
-  }
+  };
 
-  render () {
+  renderErrorsTable = () => {
+    const { renderTableHeaderRow, renderTableRows } = this;
+
+    const { queryIsRunning, campaign } = this.props;
+    const { errors } = campaign;
+
+    const loading = queryIsRunning && (!errors || !errors.length);
+
+    if (loading) {
+      return <Spinner />;
+    }
+
+    return (
+      <table className={`${baseClass}__table`}>
+        <thead>{renderTableHeaderRow(errors)}</thead>
+        <tbody>{renderTableRows(errors)}</tbody>
+      </table>
+    );
+  };
+
+  render() {
     const {
       campaign,
       onExportQueryResults,
+      onExportErrorsResults,
       isQueryFullScreen,
       isQueryShrinking,
       onToggleQueryFullScreen,
@@ -148,10 +159,17 @@ class QueryResultsTable extends Component {
       queryTimerMilliseconds,
     } = this.props;
 
-    const { renderTable } = this;
+    const { renderTable, renderErrorsTable } = this;
 
-    const { hosts_count: hostsCount, query_results: queryResults } = campaign;
-    const hasNoResults = !queryIsRunning && (!hostsCount.successful || (!queryResults || !queryResults.length));
+    const {
+      hosts_count: hostsCount,
+      query_results: queryResults,
+      errors,
+    } = campaign;
+    const hasNoResults =
+      !queryIsRunning &&
+      (!hostsCount.successful || !queryResults || !queryResults.length);
+    const hasErrors = !queryIsRunning && errors;
 
     const resultsTableWrapClass = classnames(baseClass, {
       [`${baseClass}--full-screen`]: isQueryFullScreen,
@@ -159,41 +177,76 @@ class QueryResultsTable extends Component {
       [`${baseClass}__no-results`]: hasNoResults,
     });
 
-    const toggleFullScreenBtnClass = classnames(`${baseClass}__fullscreen-btn`, {
-      [`${baseClass}__fullscreen-btn--active`]: isQueryFullScreen,
-    });
+    const toggleFullScreenBtnClass = classnames(
+      `${baseClass}__fullscreen-btn`,
+      {
+        [`${baseClass}__fullscreen-btn--active`]: isQueryFullScreen,
+      }
+    );
 
     return (
       <div className={resultsTableWrapClass}>
         <header className={`${baseClass}__button-wrap`}>
-          {isQueryFullScreen && <QueryProgressDetails
-            campaign={campaign}
-            onRunQuery={onRunQuery}
-            onStopQuery={onStopQuery}
-            queryIsRunning={queryIsRunning}
-            className={`${baseClass}__full-screen`}
-            queryTimerMilliseconds={queryTimerMilliseconds}
-          />}
-
+          {isQueryFullScreen && (
+            <QueryProgressDetails
+              campaign={campaign}
+              onRunQuery={onRunQuery}
+              onStopQuery={onStopQuery}
+              queryIsRunning={queryIsRunning}
+              className={`${baseClass}__full-screen`}
+              queryTimerMilliseconds={queryTimerMilliseconds}
+            />
+          )}
           <Button
             className={toggleFullScreenBtnClass}
             onClick={onToggleQueryFullScreen}
-            variant="muted"
+            variant="grey"
           >
-            <KolideIcon name={isQueryFullScreen ? 'windowed' : 'fullscreen'} />
+            <KolideIcon name={isQueryFullScreen ? "windowed" : "fullscreen"} />
           </Button>
-          <Button
-            className={`${baseClass}__export-btn`}
-            onClick={onExportQueryResults}
-            variant="inverse"
-          >
-            Export
-          </Button>
+          {!hasNoResults && !queryIsRunning && (
+            <Button
+              className={`${baseClass}__export-btn`}
+              onClick={onExportQueryResults}
+              variant="inverse"
+            >
+              Export results
+            </Button>
+          )}
         </header>
-        <div className={`${baseClass}__table-wrapper`}>
-          {hasNoResults && <em className="no-results-message">No results found</em>}
+        <span className={`${baseClass}__table-title`}>Results</span>
+        <div className={`${baseClass}__results-table-wrapper`}>
+          {hasNoResults && !hasErrors && (
+            <span className="no-results-message">No results found.</span>
+          )}
+          {hasNoResults && hasErrors && (
+            <span className="no-results-message">
+              No results found. Check the table below for errors.
+            </span>
+          )}
           {!hasNoResults && renderTable()}
         </div>
+        {hasErrors && (
+          <>
+            <div className={`${baseClass}__error-table-container`}>
+              <header className={`${baseClass}__button-wrap`}>
+                <div>
+                  <Button
+                    className={`${baseClass}__export-btn`}
+                    onClick={onExportErrorsResults}
+                    variant="inverse"
+                  >
+                    Export errors
+                  </Button>
+                </div>
+              </header>
+              <span className={`${baseClass}__table-title`}>Errors</span>
+              <div className={`${baseClass}__error-table-wrapper`}>
+                {renderErrorsTable()}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }

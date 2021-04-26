@@ -1,10 +1,9 @@
-import Kolide from 'kolide';
+import yaml from "js-yaml";
+import Kolide from "kolide";
 
-const yaml = require('js-yaml');
-
-export const OSQUERY_OPTIONS_FAILURE = 'OSQUERY_OPTIONS_FAILURE';
-export const OSQUERY_OPTIONS_START = 'OSQUERY_OPTIONS_START';
-export const OSQUERY_OPTIONS_SUCCESS = 'OSQUERY_OPTIONS_SUCCESS';
+export const OSQUERY_OPTIONS_FAILURE = "OSQUERY_OPTIONS_FAILURE";
+export const OSQUERY_OPTIONS_START = "OSQUERY_OPTIONS_START";
+export const OSQUERY_OPTIONS_SUCCESS = "OSQUERY_OPTIONS_SUCCESS";
 
 export const loadOsqueryOptions = { type: OSQUERY_OPTIONS_START };
 
@@ -20,7 +19,8 @@ export const getOsqueryOptions = () => {
   return (dispatch) => {
     dispatch(loadOsqueryOptions);
 
-    return Kolide.osqueryOptions.loadAll()
+    return Kolide.osqueryOptions
+      .loadAll()
       .then((osqueryOptions) => {
         dispatch(osqueryOptionsSuccess(osqueryOptions));
 
@@ -37,7 +37,8 @@ export const getOsqueryOptions = () => {
 export const updateOsqueryOptions = (osqueryOptionsData) => {
   return (dispatch) => {
     dispatch(loadOsqueryOptions);
-    return Kolide.osqueryOptions.update(osqueryOptionsData)
+    return Kolide.osqueryOptions
+      .update(osqueryOptionsData)
       .then((osqueryOptions) => {
         const yamlOptions = yaml.safeLoad(osqueryOptionsData.osquery_options);
         dispatch(osqueryOptionsSuccess(yamlOptions));

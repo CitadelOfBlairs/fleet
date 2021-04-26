@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/pkg/errors"
@@ -25,14 +26,6 @@ type jsonError struct {
 func baseError(err string) []map[string]string {
 	return []map[string]string{map[string]string{
 		"name":   "base",
-		"reason": err},
-	}
-}
-
-// same as baseError, but replaces "base" with different name.
-func namedError(name string, err string) []map[string]string {
-	return []map[string]string{map[string]string{
-		"name":   name,
 		"reason": err},
 	}
 }
@@ -157,9 +150,22 @@ func encodeError(ctx context.Context, err error, w http.ResponseWriter) {
 		return
 	}
 
-	w.WriteHeader(http.StatusInternalServerError)
+	// Get specific status code if it is available from this error type,
+	// defaulting to HTTP 500
+	status := http.StatusInternalServerError
+	if e, ok := err.(ErrWithStatusCode); ok {
+		status = e.StatusCode()
+	}
+
+	// See header documentation
+	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After)
+	if e, ok := err.(ErrWithRetryAfter); ok {
+		w.Header().Add("Retry-After", strconv.Itoa(e.RetryAfter()))
+	}
+
+	w.WriteHeader(status)
 	je := jsonError{
-		Message: "Unknown Error",
+		Message: err.Error(),
 		Errors:  baseError(err.Error()),
 	}
 	enc.Encode(je)

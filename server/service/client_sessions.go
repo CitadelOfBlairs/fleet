@@ -15,17 +15,15 @@ func (c *Client) Login(email, password string) (string, error) {
 		Password: password,
 	}
 
-	response, err := c.Do("POST", "/api/v1/kolide/login", "", params)
+	response, err := c.Do("POST", "/api/v1/fleet/login", "", params)
 	if err != nil {
-		return "", errors.Wrap(err, "POST /api/v1/kolide/login")
+		return "", errors.Wrap(err, "POST /api/v1/fleet/login")
 	}
 	defer response.Body.Close()
 
 	switch response.StatusCode {
 	case http.StatusNotFound:
 		return "", notSetupErr{}
-	case http.StatusUnauthorized:
-		return "", invalidLoginErr{}
 	}
 	if response.StatusCode != http.StatusOK {
 		return "", errors.Errorf(
@@ -50,9 +48,9 @@ func (c *Client) Login(email, password string) (string, error) {
 
 // Logout attempts to logout to the current Fleet instance.
 func (c *Client) Logout() error {
-	response, err := c.AuthenticatedDo("POST", "/api/v1/kolide/logout", "", nil)
+	response, err := c.AuthenticatedDo("POST", "/api/v1/fleet/logout", "", nil)
 	if err != nil {
-		return errors.Wrap(err, "POST /api/v1/kolide/logout")
+		return errors.Wrap(err, "POST /api/v1/fleet/logout")
 	}
 	defer response.Body.Close()
 

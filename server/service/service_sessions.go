@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/xml"
 	"net/url"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ func (svc service) InitiateSSO(ctx context.Context, redirectURL string) (string,
 	settings := sso.Settings{
 		Metadata: metadata,
 		// Construct call back url to send to idp
-		AssertionConsumerServiceURL: appConfig.KolideServerURL + svc.config.Server.URLPrefix + "/api/v1/kolide/sso/callback",
+		AssertionConsumerServiceURL: appConfig.KolideServerURL + svc.config.Server.URLPrefix + "/api/v1/fleet/sso/callback",
 		SessionStore:                svc.ssoSessionStore,
 		OriginalURL:                 redirectURL,
 	}
@@ -85,20 +86,60 @@ func (svc service) getMetadata(config *kolide.AppConfig) (*sso.Metadata, error) 
 }
 
 func (svc service) CallbackSSO(ctx context.Context, auth kolide.Auth) (*kolide.SSOSession, error) {
-	// The signature and validity of auth response has been checked already in
-	// validation middleware.
-	sess, err := svc.ssoSessionStore.Get(auth.RequestID())
+	appConfig, err := svc.ds.AppConfig()
 	if err != nil {
-		return nil, errors.Wrap(err, "fetching sso session in callback")
+		return nil, errors.Wrap(err, "get config for sso")
 	}
-	// Remove session to so that is can't be reused before it expires.
-	err = svc.ssoSessionStore.Expire(auth.RequestID())
+
+	// Load the request metadata if available
+
+	// localhost:9080/simplesaml/saml2/idp/SSOService.php?spentityid=https://localhost:8080
+	var metadata *sso.Metadata
+	var redirectURL string
+	if appConfig.EnableSSOIdPLogin && auth.RequestID() == "" {
+		// Missing request ID indicates this was IdP-initiated. Only allow if
+		// configured to do so.
+		metadata, err = svc.getMetadata(appConfig)
+		if err != nil {
+			return nil, errors.Wrap(err, "get sso metadata")
+		}
+		redirectURL = "/"
+	} else {
+		session, err := svc.ssoSessionStore.Get(auth.RequestID())
+		if err != nil {
+			return nil, errors.Wrap(err, "sso request invalid")
+		}
+		// Remove session to so that is can't be reused before it expires.
+		err = svc.ssoSessionStore.Expire(auth.RequestID())
+		if err != nil {
+			return nil, errors.Wrap(err, "remove sso request")
+		}
+		if err := xml.Unmarshal([]byte(session.Metadata), &metadata); err != nil {
+			return nil, errors.Wrap(err, "unmarshal metadata")
+		}
+		redirectURL = session.OriginalURL
+	}
+
+	// Validate response
+	validator, err := sso.NewValidator(*metadata)
 	if err != nil {
-		return nil, errors.Wrap(err, "expiring sso session in callback")
+		return nil, errors.Wrap(err, "create validator from metadata")
 	}
+	// make sure the response hasn't been tampered with
+	auth, err = validator.ValidateSignature(auth)
+	if err != nil {
+		return nil, errors.Wrap(err, "signature validation failed")
+	}
+	// make sure the response isn't stale
+	err = validator.ValidateResponse(auth)
+	if err != nil {
+		return nil, errors.Wrap(err, "response validation failed")
+	}
+
+	// Get and log in user
 	user, err := svc.userByEmailOrUsername(auth.UserID())
 	if err != nil {
-		return nil, errors.Wrap(err, "finding user in sso callback")
+		return nil, errors.Wrap(err, "find user in sso callback")
 	}
 	// if user is not active they are not authorized to use the application
 	if !user.Enabled {
@@ -110,39 +151,48 @@ func (svc service) CallbackSSO(ctx context.Context, auth kolide.Auth) (*kolide.S
 	}
 	token, err := svc.makeSession(user.ID)
 	if err != nil {
-		return nil, errors.Wrap(err, "making user session in sso callback")
+		return nil, errors.Wrap(err, "make session in sso callback")
 	}
 	result := &kolide.SSOSession{
 		Token:       token,
-		RedirectURL: sess.OriginalURL,
-	}
-	if !strings.HasPrefix(result.RedirectURL, "/") {
-		result.RedirectURL = svc.config.Server.URLPrefix + result.RedirectURL
+		RedirectURL: redirectURL,
 	}
 	return result, nil
 }
 
 func (svc service) Login(ctx context.Context, username, password string) (*kolide.User, string, error) {
+	// If there is an error, sleep until the request has taken at least 1
+	// second. This means that generally a login failure for any reason will
+	// take ~1s and frustrate a timing attack.
+	var err error
+	defer func(start time.Time) {
+		if err != nil {
+			time.Sleep(time.Until(start.Add(1 * time.Second)))
+		}
+	}(time.Now())
+
 	user, err := svc.userByEmailOrUsername(username)
 	if _, ok := err.(kolide.NotFoundError); ok {
-		return nil, "", authError{reason: "no such user"}
+		return nil, "", authFailedError{internal: "user not found"}
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, "", authFailedError{internal: err.Error()}
 	}
+
+	if err = user.ValidatePassword(password); err != nil {
+		return nil, "", authFailedError{internal: "invalid password"}
+	}
+
 	if !user.Enabled {
-		return nil, "", authError{reason: "account disabled", clientReason: "account disabled"}
+		return nil, "", authFailedError{internal: "account disabled"}
 	}
 	if user.SSOEnabled {
-		const errMessage = "password login not allowed for single sign on users"
-		return nil, "", authError{reason: errMessage, clientReason: errMessage}
+		return nil, "", authFailedError{internal: "password login disabled for sso users"}
 	}
-	if err = user.ValidatePassword(password); err != nil {
-		return nil, "", authError{reason: "bad password"}
-	}
+
 	token, err := svc.makeSession(user.ID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", authFailedError{internal: err.Error()}
 	}
 
 	return user, token, nil
@@ -261,10 +311,7 @@ func (svc service) DeleteSession(ctx context.Context, id uint) error {
 
 func (svc service) validateSession(session *kolide.Session) error {
 	if session == nil {
-		return authError{
-			reason:       "active session not present",
-			clientReason: "session error",
-		}
+		return authRequiredError{internal: "active session not present"}
 	}
 
 	sessionDuration := svc.config.Session.Duration
@@ -274,10 +321,7 @@ func (svc service) validateSession(session *kolide.Session) error {
 		if err != nil {
 			return errors.Wrap(err, "destroying session")
 		}
-		return authError{
-			reason:       "expired session",
-			clientReason: "session error",
-		}
+		return authRequiredError{internal: "expired session"}
 	}
 
 	return svc.ds.MarkSessionAccessed(session)

@@ -3,87 +3,81 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"time"
-	"io/ioutil"
 
 	"github.com/briandowns/spinner"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-
-func queryCommand() cli.Command {
+func queryCommand() *cli.Command {
 	var (
 		flHosts, flLabels, flQuery, flQueryName string
-		flDebug, flQuiet, flExit, flPretty      bool
+		flQuiet, flExit, flPretty               bool
 		flTimeout                               time.Duration
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:      "query",
 		Usage:     "Run a live query",
 		UsageText: `fleetctl query [options]`,
 		Flags: []cli.Flag{
-			configFlag(),
-			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "hosts",
-				EnvVar:      "HOSTS",
+				EnvVars:     []string{"HOSTS"},
 				Value:       "",
 				Destination: &flHosts,
 				Usage:       "Comma separated hostnames to target",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "labels",
-				EnvVar:      "LABELS",
+				EnvVars:     []string{"LABELS"},
 				Value:       "",
 				Destination: &flLabels,
 				Usage:       "Comma separated label names to target",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:        "quiet",
-				EnvVar:      "QUIET",
+				EnvVars:     []string{"QUIET"},
 				Destination: &flQuiet,
 				Usage:       "Only print results (no status information)",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:        "exit",
-				EnvVar:      "EXIT",
+				EnvVars:     []string{"EXIT"},
 				Destination: &flExit,
 				Usage:       "Exit when 100% of online hosts have results returned",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "query",
-				EnvVar:      "QUERY",
+				EnvVars:     []string{"QUERY"},
 				Value:       "",
 				Destination: &flQuery,
 				Usage:       "Query to run",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "query-name",
-				EnvVar:      "QUERYNAME",
+				EnvVars:     []string{"QUERYNAME"},
 				Value:       "",
 				Destination: &flQueryName,
 				Usage:       "Name of saved query to run",
 			},
-			cli.BoolFlag{
-				Name:        "debug",
-				EnvVar:      "DEBUG",
-				Destination: &flDebug,
-				Usage:       "Whether or not to enable debug logging",
-			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:        "pretty",
-				EnvVar:      "PRETTY",
+				EnvVars:     []string{"PRETTY"},
 				Destination: &flPretty,
 				Usage:       "Enable pretty-printing",
 			},
-			cli.DurationFlag{
+			&cli.DurationFlag{
 				Name:        "timeout",
-				EnvVar:      "TIMEOUT",
+				EnvVars:     []string{"TIMEOUT"},
 				Destination: &flTimeout,
 				Usage:       "How long to run query before exiting (10s, 1h, etc.)",
 			},
+			configFlag(),
+			contextFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			fleet, err := clientFromCLI(c)

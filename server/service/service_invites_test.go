@@ -89,7 +89,7 @@ func setupInviteTest(t *testing.T) (kolide.Service, *mock.Store, *mockMailServic
 		KolideServerURL: "https://acme.co",
 	})
 	mailer := &mockMailService{SendEmailFn: func(e kolide.Email) error { return nil }}
-	svc := validationMiddleware{service{
+	svc := validationMiddleware{&service{
 		ds:          ms,
 		config:      config.TestConfig(),
 		mailService: mailer,
@@ -103,12 +103,6 @@ var adminUser = &kolide.User{
 	Email:    "admin@acme.co",
 	Username: "admin",
 	Name:     "Administrator",
-}
-
-var existingUser = &kolide.User{
-	ID:       2,
-	Email:    "user@acme.co",
-	Username: "user",
 }
 
 var validInvite = &kolide.Invite{

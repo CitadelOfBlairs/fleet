@@ -12,16 +12,15 @@ import (
 	"time"
 
 	"github.com/WatchBeam/clock"
-	"github.com/go-kit/kit/log"
 	"github.com/fleetdm/fleet/server/config"
 	hostctx "github.com/fleetdm/fleet/server/contexts/host"
 	"github.com/fleetdm/fleet/server/contexts/viewer"
-	"github.com/fleetdm/fleet/server/datastore/inmem"
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/fleetdm/fleet/server/live_query"
 	"github.com/fleetdm/fleet/server/logging"
 	"github.com/fleetdm/fleet/server/mock"
 	"github.com/fleetdm/fleet/server/pubsub"
+	"github.com/go-kit/kit/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +35,7 @@ func TestEnrollAgent(t *testing.T) {
 			return "", errors.New("not found")
 		}
 	}
-	ds.EnrollHostFunc = func(osqueryHostId, nodeKey, secretName string) (*kolide.Host, error) {
+	ds.EnrollHostFunc = func(osqueryHostId, nodeKey, secretName string, cooldown time.Duration) (*kolide.Host, error) {
 		return &kolide.Host{
 			OsqueryHostID: osqueryHostId, NodeKey: nodeKey, EnrollSecretName: secretName,
 		}, nil
@@ -74,7 +73,7 @@ func TestEnrollAgentDetails(t *testing.T) {
 	ds.VerifyEnrollSecretFunc = func(secret string) (string, error) {
 		return "valid", nil
 	}
-	ds.EnrollHostFunc = func(osqueryHostId, nodeKey, secretName string) (*kolide.Host, error) {
+	ds.EnrollHostFunc = func(osqueryHostId, nodeKey, secretName string, cooldown time.Duration) (*kolide.Host, error) {
 		return &kolide.Host{
 			OsqueryHostID: osqueryHostId, NodeKey: nodeKey, EnrollSecretName: secretName,
 		}, nil
@@ -115,23 +114,46 @@ func TestEnrollAgentDetails(t *testing.T) {
 func TestAuthenticateHost(t *testing.T) {
 	ds := new(mock.Store)
 	svc, err := newTestService(ds, nil, nil)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	var gotKey string
-	host := kolide.Host{HostName: "foobar"}
+	host := kolide.Host{ID: 1, HostName: "foobar"}
 	ds.AuthenticateHostFunc = func(key string) (*kolide.Host, error) {
 		gotKey = key
 		return &host, nil
 	}
-	ds.MarkHostSeenFunc = func(host *kolide.Host, t time.Time) error {
+	var gotHostIDs []uint
+	ds.MarkHostsSeenFunc = func(hostIDs []uint, t time.Time) error {
+		gotHostIDs = hostIDs
 		return nil
 	}
 
-	h, err := svc.AuthenticateHost(context.Background(), "test")
+	_, err = svc.AuthenticateHost(context.Background(), "test")
 	require.Nil(t, err)
 	assert.Equal(t, "test", gotKey)
-	assert.True(t, ds.MarkHostSeenFuncInvoked)
-	assert.Equal(t, host, *h)
+	assert.False(t, ds.MarkHostsSeenFuncInvoked)
+
+	host = kolide.Host{ID: 7, HostName: "foobar"}
+	_, err = svc.AuthenticateHost(context.Background(), "floobar")
+	require.Nil(t, err)
+	assert.Equal(t, "floobar", gotKey)
+	assert.False(t, ds.MarkHostsSeenFuncInvoked)
+	// Host checks in twice
+	host = kolide.Host{ID: 7, HostName: "foobar"}
+	_, err = svc.AuthenticateHost(context.Background(), "floobar")
+	require.Nil(t, err)
+	assert.Equal(t, "floobar", gotKey)
+	assert.False(t, ds.MarkHostsSeenFuncInvoked)
+
+	err = svc.FlushSeenHosts(context.Background())
+	require.NoError(t, err)
+	assert.True(t, ds.MarkHostsSeenFuncInvoked)
+	assert.ElementsMatch(t, []uint{1, 7}, gotHostIDs)
+
+	err = svc.FlushSeenHosts(context.Background())
+	require.NoError(t, err)
+	assert.True(t, ds.MarkHostsSeenFuncInvoked)
+	assert.Len(t, gotHostIDs, 0)
 }
 
 func TestAuthenticateHostFailure(t *testing.T) {
@@ -162,7 +184,7 @@ func TestSubmitStatusLogs(t *testing.T) {
 	require.Nil(t, err)
 
 	// Hack to get at the service internals and modify the writer
-	serv := ((svc.(validationMiddleware)).Service).(service)
+	serv := ((svc.(validationMiddleware)).Service).(*service)
 
 	testLogger := &testJSONLogger{}
 	serv.osqueryLogWriter = &logging.OsqueryLogger{Status: testLogger}
@@ -191,7 +213,7 @@ func TestSubmitResultLogs(t *testing.T) {
 	require.Nil(t, err)
 
 	// Hack to get at the service internals and modify the writer
-	serv := ((svc.(validationMiddleware)).Service).(service)
+	serv := ((svc.(validationMiddleware)).Service).(*service)
 
 	testLogger := &testJSONLogger{}
 	serv.osqueryLogWriter = &logging.OsqueryLogger{Result: testLogger}
@@ -280,11 +302,16 @@ func TestLabelQueries(t *testing.T) {
 	svc, err := newTestServiceWithClock(ds, nil, lq, mockClock)
 	require.Nil(t, err)
 
+	host := &kolide.Host{}
+
 	ds.LabelQueriesForHostFunc = func(host *kolide.Host, cutoff time.Time) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 	ds.DistributedQueriesForHostFunc = func(host *kolide.Host) (map[uint]string, error) {
 		return map[uint]string{}, nil
+	}
+	ds.HostFunc = func(id uint) (*kolide.Host, error) {
+		return host, nil
 	}
 	ds.SaveHostFunc = func(host *kolide.Host) error {
 		return nil
@@ -295,7 +322,6 @@ func TestLabelQueries(t *testing.T) {
 
 	lq.On("QueriesForHost", uint(0)).Return(map[string]string{}, nil)
 
-	host := &kolide.Host{}
 	ctx := hostctx.NewContext(context.Background(), *host)
 
 	// With a new host, we should get the detail queries (and accelerate
@@ -347,6 +373,7 @@ func TestLabelQueries(t *testing.T) {
 			hostLabelQueryPrefix + "1": {{"col1": "val1"}},
 		},
 		map[string]kolide.OsqueryStatus{},
+		map[string]string{},
 	)
 	assert.Nil(t, err)
 	host.LabelUpdateTime = mockClock.Now()
@@ -366,6 +393,7 @@ func TestLabelQueries(t *testing.T) {
 			hostLabelQueryPrefix + "3": {},
 		},
 		map[string]kolide.OsqueryStatus{},
+		map[string]string{},
 	)
 	assert.Nil(t, err)
 	host.LabelUpdateTime = mockClock.Now()
@@ -546,7 +574,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 
 	resultJSON := `
 {
-"kolide_detail_query_network_interface": [
+"fleet_detail_query_network_interface": [
 		{
 				"address": "192.168.0.1",
 				"broadcast": "192.168.0.255",
@@ -566,7 +594,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 				"type": ""
 		}
 ],
-"kolide_detail_query_os_version": [
+"fleet_detail_query_os_version": [
 		{
 				"platform": "darwin",
 				"build": "15G1004",
@@ -576,7 +604,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 				"patch": "6"
 		}
 ],
-"kolide_detail_query_osquery_info": [
+"fleet_detail_query_osquery_info": [
 		{
 				"build_distro": "10.10",
 				"build_platform": "darwin",
@@ -589,7 +617,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 				"watcher": "38112"
 		}
 ],
-"kolide_detail_query_system_info": [
+"fleet_detail_query_system_info": [
 		{
 				"computer_name": "computer",
 				"cpu_brand": "Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz",
@@ -606,7 +634,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 				"uuid": "uuid"
 		}
 ],
-"kolide_detail_query_uptime": [
+"fleet_detail_query_uptime": [
 		{
 				"days": "20",
 				"hours": "0",
@@ -615,7 +643,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 				"total_seconds": "1730893"
 		}
 ],
-"kolide_detail_query_osquery_flags": [
+"fleet_detail_query_osquery_flags": [
 		{
 			"name":"config_tls_refresh",
 			"value":""
@@ -643,7 +671,7 @@ func TestDetailQueriesWithEmptyStrings(t *testing.T) {
 	}
 
 	// Verify that results are ingested properly
-	svc.SubmitDistributedQueryResults(ctx, results, map[string]kolide.OsqueryStatus{})
+	svc.SubmitDistributedQueryResults(ctx, results, map[string]kolide.OsqueryStatus{}, map[string]string{})
 
 	// osquery_info
 	assert.Equal(t, "darwin", gotHost.Platform)
@@ -713,7 +741,7 @@ func TestDetailQueries(t *testing.T) {
 
 	resultJSON := `
 {
-"kolide_detail_query_network_interface": [
+"fleet_detail_query_network_interface": [
     {
         "address": "192.168.0.1",
         "broadcast": "192.168.0.255",
@@ -733,7 +761,7 @@ func TestDetailQueries(t *testing.T) {
         "type": "6"
     }
 ],
-"kolide_detail_query_os_version": [
+"fleet_detail_query_os_version": [
     {
         "platform": "darwin",
         "build": "15G1004",
@@ -743,7 +771,7 @@ func TestDetailQueries(t *testing.T) {
         "patch": "6"
     }
 ],
-"kolide_detail_query_osquery_info": [
+"fleet_detail_query_osquery_info": [
     {
         "build_distro": "10.10",
         "build_platform": "darwin",
@@ -756,7 +784,7 @@ func TestDetailQueries(t *testing.T) {
         "watcher": "38112"
     }
 ],
-"kolide_detail_query_system_info": [
+"fleet_detail_query_system_info": [
     {
         "computer_name": "computer",
         "cpu_brand": "Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz",
@@ -773,7 +801,7 @@ func TestDetailQueries(t *testing.T) {
         "uuid": "uuid"
     }
 ],
-"kolide_detail_query_uptime": [
+"fleet_detail_query_uptime": [
     {
         "days": "20",
         "hours": "0",
@@ -782,7 +810,7 @@ func TestDetailQueries(t *testing.T) {
         "total_seconds": "1730893"
     }
 ],
-"kolide_detail_query_osquery_flags": [
+"fleet_detail_query_osquery_flags": [
     {
       "name":"config_tls_refresh",
       "value":"10"
@@ -813,7 +841,7 @@ func TestDetailQueries(t *testing.T) {
 		return nil
 	}
 	// Verify that results are ingested properly
-	svc.SubmitDistributedQueryResults(ctx, results, map[string]kolide.OsqueryStatus{})
+	svc.SubmitDistributedQueryResults(ctx, results, map[string]kolide.OsqueryStatus{}, map[string]string{})
 
 	// osquery_info
 	assert.Equal(t, "darwin", gotHost.Platform)
@@ -882,7 +910,44 @@ func TestDetailQueryNetworkInterfaces(t *testing.T) {
 	assert.Equal(t, "192.168.1.3", host.PrimaryIP)
 	assert.Equal(t, "f4:5d:79:93:58:5b", host.PrimaryMac)
 
-	// Only local/loopback
+	// Only IPv6
+	require.NoError(t, json.Unmarshal([]byte(`
+[
+  {"address":"127.0.0.1","mac":"00:00:00:00:00:00"},
+  {"address":"::1","mac":"00:00:00:00:00:00"},
+  {"address":"fe80::1%lo0","mac":"00:00:00:00:00:00"},
+  {"address":"fe80::df:429b:971c:d051%en0","mac":"f4:5c:89:92:57:5b"},
+  {"address":"2604:3f08:1337:9411:cbe:814f:51a6:e4e3","mac":"27:1b:aa:60:e8:0a"},
+  {"address":"3333:3f08:1337:9411:cbe:814f:51a6:e4e3","mac":"bb:1b:aa:60:e8:bb"},
+  {"address":"fe80::3a6f:582f:86c5:8296%utun0","mac":"00:00:00:00:00:00"}
+]`),
+		&rows,
+	))
+
+	assert.NoError(t, ingest(log.NewNopLogger(), &host, rows))
+	assert.Equal(t, "2604:3f08:1337:9411:cbe:814f:51a6:e4e3", host.PrimaryIP)
+	assert.Equal(t, "27:1b:aa:60:e8:0a", host.PrimaryMac)
+
+	// IPv6 appears before IPv4 (v4 should be prioritized)
+	require.NoError(t, json.Unmarshal([]byte(`
+[
+  {"address":"127.0.0.1","mac":"00:00:00:00:00:00"},
+  {"address":"::1","mac":"00:00:00:00:00:00"},
+  {"address":"fe80::1%lo0","mac":"00:00:00:00:00:00"},
+  {"address":"fe80::df:429b:971c:d051%en0","mac":"f4:5c:89:92:57:5b"},
+  {"address":"2604:3f08:1337:9411:cbe:814f:51a6:e4e3","mac":"27:1b:aa:60:e8:0a"},
+  {"address":"205.111.43.79","mac":"ab:1b:aa:60:e8:0a"},
+  {"address":"205.111.44.80","mac":"bb:bb:aa:60:e8:0a"},
+  {"address":"fe80::3a6f:582f:86c5:8296%utun0","mac":"00:00:00:00:00:00"}
+]`),
+		&rows,
+	))
+
+	assert.NoError(t, ingest(log.NewNopLogger(), &host, rows))
+	assert.Equal(t, "205.111.43.79", host.PrimaryIP)
+	assert.Equal(t, "ab:1b:aa:60:e8:0a", host.PrimaryMac)
+
+	// Only link-local/loopback
 	require.NoError(t, json.Unmarshal([]byte(`
 [
   {"address":"127.0.0.1","mac":"00:00:00:00:00:00"},
@@ -1069,7 +1134,7 @@ func TestDistributedQueryResults(t *testing.T) {
 	// this test.
 	time.Sleep(10 * time.Millisecond)
 
-	err = svc.SubmitDistributedQueryResults(hostCtx, results, map[string]kolide.OsqueryStatus{})
+	err = svc.SubmitDistributedQueryResults(hostCtx, results, map[string]kolide.OsqueryStatus{}, map[string]string{})
 	require.Nil(t, err)
 }
 
@@ -1087,7 +1152,7 @@ func TestIngestDistributedQueryParseIdError(t *testing.T) {
 	}
 
 	host := kolide.Host{ID: 1}
-	err := svc.ingestDistributedQuery(host, "bad_name", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "bad_name", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to parse campaign")
 }
@@ -1111,7 +1176,7 @@ func TestIngestDistributedQueryOrphanedCampaignLoadError(t *testing.T) {
 
 	host := kolide.Host{ID: 1}
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "loading orphaned campaign")
 }
@@ -1144,7 +1209,7 @@ func TestIngestDistributedQueryOrphanedCampaignWaitListener(t *testing.T) {
 
 	host := kolide.Host{ID: 1}
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "campaign waiting for listener")
 }
@@ -1180,7 +1245,7 @@ func TestIngestDistributedQueryOrphanedCloseError(t *testing.T) {
 
 	host := kolide.Host{ID: 1}
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "closing orphaned campaign")
 }
@@ -1217,7 +1282,7 @@ func TestIngestDistributedQueryOrphanedStopError(t *testing.T) {
 
 	host := kolide.Host{ID: 1}
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stopping orphaned campaign")
 }
@@ -1254,7 +1319,7 @@ func TestIngestDistributedQueryOrphanedStop(t *testing.T) {
 
 	host := kolide.Host{ID: 1}
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.NoError(t, err)
 	lq.AssertExpectations(t)
 }
@@ -1284,7 +1349,7 @@ func TestIngestDistributedQueryRecordCompletionError(t *testing.T) {
 	}()
 	time.Sleep(10 * time.Millisecond)
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "record query completion")
 	lq.AssertExpectations(t)
@@ -1315,7 +1380,7 @@ func TestIngestDistributedQuery(t *testing.T) {
 	}()
 	time.Sleep(10 * time.Millisecond)
 
-	err := svc.ingestDistributedQuery(host, "kolide_distributed_query_42", []map[string]string{}, false)
+	err := svc.ingestDistributedQuery(host, "fleet_distributed_query_42", []map[string]string{}, false, "")
 	require.NoError(t, err)
 	lq.AssertExpectations(t)
 }
@@ -1403,6 +1468,25 @@ func TestUpdateHostIntervals(t *testing.T) {
 			}}`),
 			true,
 		},
+		// config_refresh should also cause an update
+		{
+			kolide.Host{
+				DistributedInterval: 11,
+				LoggerTLSPeriod:     33,
+				ConfigTLSRefresh:    60,
+			},
+			kolide.Host{
+				DistributedInterval: 11,
+				LoggerTLSPeriod:     33,
+				ConfigTLSRefresh:    42,
+			},
+			json.RawMessage(`{"options":{
+				"distributed_interval": 11,
+				"logger_tls_period":    33,
+				"config_refresh":    42
+			}}`),
+			true,
+		},
 		// SaveHost should not be called with no changes
 		{
 			kolide.Host{
@@ -1446,22 +1530,6 @@ func TestUpdateHostIntervals(t *testing.T) {
 
 }
 
-func setupOsqueryTests(t *testing.T) (kolide.Datastore, *live_query.MockLiveQuery, kolide.Service, *clock.MockClock) {
-	ds, err := inmem.New(config.TestConfig())
-	require.Nil(t, err)
-
-	lq := &live_query.MockLiveQuery{}
-
-	_, err = ds.NewAppConfig(&kolide.AppConfig{})
-	require.Nil(t, err)
-
-	mockClock := clock.NewMockClock()
-	svc, err := newTestServiceWithClock(ds, nil, lq, mockClock)
-	require.Nil(t, err)
-
-	return ds, lq, svc, mockClock
-}
-
 type notFoundError struct{}
 
 func (e notFoundError) Error() string {
@@ -1482,15 +1550,18 @@ func TestAuthenticationErrors(t *testing.T) {
 	}
 
 	svc, err := newTestService(ms, nil, nil)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	_, err = svc.AuthenticateHost(ctx, "")
-	require.NotNil(t, err)
+	require.Error(t, err)
 	require.True(t, err.(osqueryError).NodeInvalid())
 
+	ms.AuthenticateHostFunc = func(nodeKey string) (*kolide.Host, error) {
+		return &kolide.Host{ID: 1}, nil
+	}
 	_, err = svc.AuthenticateHost(ctx, "foo")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	// return not found error
 	ms.AuthenticateHostFunc = func(nodeKey string) (*kolide.Host, error) {
@@ -1498,7 +1569,7 @@ func TestAuthenticationErrors(t *testing.T) {
 	}
 
 	_, err = svc.AuthenticateHost(ctx, "foo")
-	require.NotNil(t, err)
+	require.Error(t, err)
 	require.True(t, err.(osqueryError).NodeInvalid())
 
 	// return other error
@@ -1509,4 +1580,77 @@ func TestAuthenticationErrors(t *testing.T) {
 	_, err = svc.AuthenticateHost(ctx, "foo")
 	require.NotNil(t, err)
 	require.False(t, err.(osqueryError).NodeInvalid())
+}
+
+func TestGetHostIdentifier(t *testing.T) {
+	t.Parallel()
+
+	details := map[string](map[string]string){
+		"osquery_info": map[string]string{
+			"uuid":        "foouuid",
+			"instance_id": "fooinstance",
+		},
+		"system_info": map[string]string{
+			"hostname": "foohost",
+		},
+	}
+
+	emptyDetails := map[string](map[string]string){
+		"osquery_info": map[string]string{
+			"uuid":        "",
+			"instance_id": "",
+		},
+		"system_info": map[string]string{
+			"hostname": "",
+		},
+	}
+
+	testCases := []struct {
+		identifierOption   string
+		providedIdentifier string
+		details            map[string](map[string]string)
+		expected           string
+		shouldPanic        bool
+	}{
+		// Panix
+		{identifierOption: "bad", shouldPanic: true},
+		{identifierOption: "", shouldPanic: true},
+
+		// Missing details
+		{identifierOption: "instance", providedIdentifier: "foobar", expected: "foobar"},
+		{identifierOption: "uuid", providedIdentifier: "foobar", expected: "foobar"},
+		{identifierOption: "hostname", providedIdentifier: "foobar", expected: "foobar"},
+		{identifierOption: "provided", providedIdentifier: "foobar", expected: "foobar"},
+
+		// Empty details
+		{identifierOption: "instance", providedIdentifier: "foobar", details: emptyDetails, expected: "foobar"},
+		{identifierOption: "uuid", providedIdentifier: "foobar", details: emptyDetails, expected: "foobar"},
+		{identifierOption: "hostname", providedIdentifier: "foobar", details: emptyDetails, expected: "foobar"},
+		{identifierOption: "provided", providedIdentifier: "foobar", details: emptyDetails, expected: "foobar"},
+
+		// Successes
+		{identifierOption: "instance", providedIdentifier: "foobar", details: details, expected: "fooinstance"},
+		{identifierOption: "uuid", providedIdentifier: "foobar", details: details, expected: "foouuid"},
+		{identifierOption: "hostname", providedIdentifier: "foobar", details: details, expected: "foohost"},
+		{identifierOption: "provided", providedIdentifier: "foobar", details: details, expected: "foobar"},
+	}
+	logger := log.NewNopLogger()
+
+	for _, tt := range testCases {
+		t.Run("", func(t *testing.T) {
+			if tt.shouldPanic {
+				assert.Panics(
+					t,
+					func() { getHostIdentifier(logger, tt.identifierOption, tt.providedIdentifier, tt.details) },
+				)
+				return
+			}
+
+			assert.Equal(
+				t,
+				tt.expected,
+				getHostIdentifier(logger, tt.identifierOption, tt.providedIdentifier, tt.details),
+			)
+		})
+	}
 }

@@ -32,6 +32,13 @@
     @include clearfix;
     margin: 0 0 30px;
 
+    h2 {
+      a {
+        color: $black;
+        scroll-margin-top: 210px; // used to push down anchor to visible area when there are sticky headers
+      }
+    }
+
     .smtp-options {
       font-size: 15px;
       font-weight: $bold;
@@ -91,9 +98,7 @@
     float: right;
     width: 40%;
 
-    p {
-      font-size: $x-small;
-      font-style: italic;
+    .icon-tooltip {
       margin: 32px 0;
     }
 

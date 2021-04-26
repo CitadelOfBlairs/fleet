@@ -4,17 +4,18 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-func logoutCommand() cli.Command {
-	return cli.Command{
+func logoutCommand() *cli.Command {
+	return &cli.Command{
 		Name:      "logout",
-		Usage:     "Logout of Kolide Fleet",
+		Usage:     "Log out of Fleet",
 		UsageText: `fleetctl logout [options]`,
 		Flags: []cli.Flag{
 			configFlag(),
 			contextFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			fleet, err := clientFromCLI(c)
@@ -23,10 +24,12 @@ func logoutCommand() cli.Command {
 			}
 
 			if err := fleet.Logout(); err != nil {
-				return errors.Wrap(err, "error logging in")
+				return errors.Wrap(err, "error logging out")
 			}
 
-			if err := setConfigValue(c, "token", ""); err != nil {
+			configPath, context := c.String("config"), c.String("context")
+
+			if err := setConfigValue(configPath, context, "token", ""); err != nil {
 				return errors.Wrap(err, "error setting token for the current context")
 			}
 

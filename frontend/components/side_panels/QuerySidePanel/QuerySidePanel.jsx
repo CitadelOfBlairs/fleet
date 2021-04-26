@@ -1,17 +1,21 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
+import React, { Component } from "react";
+import PropTypes from "prop-types";
+import classnames from "classnames";
 
-import osqueryTableInterface from 'interfaces/osquery_table';
-import { osqueryTableNames } from 'utilities/osquery_tables';
-import { iconNameForPlatform } from 'utilities/icon_name';
-import Dropdown from 'components/forms/fields/Dropdown';
-import KolideIcon from 'components/icons/KolideIcon';
-import Icon from 'components/icons/Icon';
-import SecondarySidePanelContainer from '../SecondarySidePanelContainer';
+import IconToolTip from "components/IconToolTip";
+import osqueryTableInterface from "interfaces/osquery_table";
+import { osqueryTableNames } from "utilities/osquery_tables";
+import Dropdown from "components/forms/fields/Dropdown";
+import KolideIcon from "components/icons/KolideIcon";
+import SecondarySidePanelContainer from "../SecondarySidePanelContainer";
 
-import displayTypeForDataType from './helpers';
+import displayTypeForDataType from "./helpers";
 
-const baseClass = 'query-side-panel';
+import AppleIcon from "../../../../assets/images/icon-apple-dark-20x20@2x.png";
+import LinuxIcon from "../../../../assets/images/icon-linux-dark-20x20@2x.png";
+import WindowsIcon from "../../../../assets/images/icon-windows-dark-20x20@2x.png";
+
+const baseClass = "query-side-panel";
 
 class QuerySidePanel extends Component {
   static propTypes = {
@@ -26,7 +30,7 @@ class QuerySidePanel extends Component {
     onOsqueryTableSelect(value);
 
     return false;
-  }
+  };
 
   onSuggestedQueryClick = (query) => {
     return (evt) => {
@@ -41,20 +45,22 @@ class QuerySidePanel extends Component {
   renderColumns = () => {
     const { selectedOsqueryTable } = this.props;
     const columns = selectedOsqueryTable.columns;
-    const columnBaseClass = 'query-column-list';
+    const columnBaseClass = "query-column-list";
 
     return columns.map((column) => {
       return (
         <li key={column.name} className={`${columnBaseClass}__item`}>
           <span className={`${columnBaseClass}__name`}>{column.name}</span>
+          <IconToolTip text={column.description} />
           <div className={`${columnBaseClass}__description`}>
-            <span className={`${columnBaseClass}__type`}>{displayTypeForDataType(column.type)}</span>
-            <KolideIcon name="help-solid" className={`${columnBaseClass}__help`} title={column.description} />
+            <span className={`${columnBaseClass}__type`}>
+              {displayTypeForDataType(column.type)}
+            </span>
           </div>
         </li>
       );
     });
-  }
+  };
 
   renderTableSelect = () => {
     const { onSelectTable } = this;
@@ -72,14 +78,15 @@ class QuerySidePanel extends Component {
         placeholder="Choose Table..."
       />
     );
-  }
+  };
 
-  render () {
+  render() {
+    const { renderColumns, renderTableSelect } = this;
     const {
-      renderColumns,
-      renderTableSelect,
-    } = this;
-    const { selectedOsqueryTable: { description, platforms } } = this.props;
+      selectedOsqueryTable: { description, platforms },
+    } = this.props;
+
+    const iconClasses = classnames([`${baseClass}__icon`], "icon");
 
     return (
       <SecondarySidePanelContainer className={baseClass}>
@@ -93,22 +100,57 @@ class QuerySidePanel extends Component {
           <h2 className={`${baseClass}__header`}>OS Availability</h2>
           <ul className={`${baseClass}__platforms`}>
             {platforms.map((platform) => {
-              if (platform === 'all') {
-                return <li key={platform}><KolideIcon name="hosts" /> {platform}</li>;
-              } else if (platform === 'freebsd') {
-                return <li key={platform}><KolideIcon name="single-host" /> {platform}</li>;
+              if (platform === "all") {
+                return (
+                  <li key={platform}>
+                    <KolideIcon name="hosts" /> {platform}
+                  </li>
+                );
+              } else if (platform === "freebsd") {
+                return (
+                  <li key={platform}>
+                    <KolideIcon name="single-host" /> {platform}
+                  </li>
+                );
+              }
+              platform = platform.toLowerCase();
+              let icon = (
+                <img
+                  src={AppleIcon}
+                  alt={`${platform} icon`}
+                  className={iconClasses}
+                />
+              );
+              if (platform === "linux") {
+                icon = (
+                  <img
+                    src={LinuxIcon}
+                    alt={`${platform} icon`}
+                    className={iconClasses}
+                  />
+                );
+              } else if (platform === "windows") {
+                icon = (
+                  <img
+                    src={WindowsIcon}
+                    alt={`${platform} icon`}
+                    className={iconClasses}
+                  />
+                );
               }
 
-              return <li key={platform}><Icon name={iconNameForPlatform(platform)} size="20" /> {platform}</li>;
+              return (
+                <li key={platform}>
+                  {icon} {platform}
+                </li>
+              );
             })}
           </ul>
         </div>
 
         <div className={`${baseClass}__columns`}>
           <h2 className={`${baseClass}__header`}>Columns</h2>
-          <ul className={`${baseClass}__column-list`}>
-            {renderColumns()}
-          </ul>
+          <ul className={`${baseClass}__column-list`}>{renderColumns()}</ul>
         </div>
       </SecondarySidePanelContainer>
     );

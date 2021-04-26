@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ghodss/yaml"
 	"github.com/fleetdm/fleet/server/kolide"
+	"github.com/ghodss/yaml"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -114,31 +114,25 @@ func specGroupFromBytes(b []byte) (*specGroup, error) {
 	return specs, nil
 }
 
-func applyCommand() cli.Command {
+func applyCommand() *cli.Command {
 	var (
 		flFilename string
-		flDebug    bool
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:      "apply",
 		Usage:     "Apply files to declaratively manage osquery configurations",
 		UsageText: `fleetctl apply [options]`,
 		Flags: []cli.Flag{
-			configFlag(),
-			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "f",
-				EnvVar:      "FILENAME",
+				EnvVars:     []string{"FILENAME"},
 				Value:       "",
 				Destination: &flFilename,
 				Usage:       "A file to apply",
 			},
-			cli.BoolFlag{
-				Name:        "debug",
-				EnvVar:      "DEBUG",
-				Destination: &flDebug,
-				Usage:       "Whether or not to enable debug logging",
-			},
+			configFlag(),
+			contextFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if flFilename == "" {

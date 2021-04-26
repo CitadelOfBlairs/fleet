@@ -22,11 +22,13 @@ type HostByIdentifierFunc func(identifier string) (*kolide.Host, error)
 
 type ListHostsFunc func(opt kolide.HostListOptions) ([]*kolide.Host, error)
 
-type EnrollHostFunc func(osqueryHostId, nodeKey, secretName string) (*kolide.Host, error)
+type EnrollHostFunc func(osqueryHostId, nodeKey, secretName string, cooldown time.Duration) (*kolide.Host, error)
 
 type AuthenticateHostFunc func(nodeKey string) (*kolide.Host, error)
 
 type MarkHostSeenFunc func(host *kolide.Host, t time.Time) error
+
+type MarkHostsSeenFunc func(hostIDs []uint, t time.Time) error
 
 type CleanupIncomingHostsFunc func(t time.Time) error
 
@@ -65,6 +67,9 @@ type HostStore struct {
 
 	MarkHostSeenFunc        MarkHostSeenFunc
 	MarkHostSeenFuncInvoked bool
+
+	MarkHostsSeenFunc        MarkHostsSeenFunc
+	MarkHostsSeenFuncInvoked bool
 
 	CleanupIncomingHostsFunc        CleanupIncomingHostsFunc
 	CleanupIncomingHostsFuncInvoked bool
@@ -112,9 +117,9 @@ func (s *HostStore) ListHosts(opt kolide.HostListOptions) ([]*kolide.Host, error
 	return s.ListHostsFunc(opt)
 }
 
-func (s *HostStore) EnrollHost(osqueryHostId, nodeKey, secretName string) (*kolide.Host, error) {
+func (s *HostStore) EnrollHost(osqueryHostId, nodeKey, secretName string, cooldown time.Duration) (*kolide.Host, error) {
 	s.EnrollHostFuncInvoked = true
-	return s.EnrollHostFunc(osqueryHostId, nodeKey, secretName)
+	return s.EnrollHostFunc(osqueryHostId, nodeKey, secretName, cooldown)
 }
 
 func (s *HostStore) AuthenticateHost(nodeKey string) (*kolide.Host, error) {
@@ -125,6 +130,11 @@ func (s *HostStore) AuthenticateHost(nodeKey string) (*kolide.Host, error) {
 func (s *HostStore) MarkHostSeen(host *kolide.Host, t time.Time) error {
 	s.MarkHostSeenFuncInvoked = true
 	return s.MarkHostSeenFunc(host, t)
+}
+
+func (s *HostStore) MarkHostsSeen(hostIDs []uint, t time.Time) error {
+	s.MarkHostsSeenFuncInvoked = true
+	return s.MarkHostsSeenFunc(hostIDs, t)
 }
 
 func (s *HostStore) CleanupIncomingHosts(t time.Time) error {

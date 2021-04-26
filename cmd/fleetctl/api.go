@@ -6,7 +6,7 @@ import (
 
 	"github.com/fleetdm/fleet/server/service"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 func unauthenticatedClientFromCLI(c *cli.Context) (*service.Client, error) {
@@ -32,7 +32,18 @@ func unauthenticatedClientFromCLI(c *cli.Context) (*service.Client, error) {
 		return nil, errors.New("Windows clients must configure rootca (secure) or tls-skip-verify (insecure)")
 	}
 
-	fleet, err := service.NewClient(cc.Address, cc.TLSSkipVerify, cc.RootCA, cc.URLPrefix)
+	var options []service.ClientOption
+	if getDebug(c) {
+		options = append(options, service.EnableClientDebug())
+	}
+
+	fleet, err := service.NewClient(
+		cc.Address,
+		cc.TLSSkipVerify,
+		cc.RootCA,
+		cc.URLPrefix,
+		options...,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating Fleet API client handler")
 	}
@@ -46,8 +57,10 @@ func clientFromCLI(c *cli.Context) (*service.Client, error) {
 		return nil, err
 	}
 
+	configPath, context := c.String("config"), c.String("context")
+
 	// Add authentication token
-	t, err := getConfigValue(c, "token")
+	t, err := getConfigValue(configPath, context, "token")
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting token from the config")
 	}

@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ghodss/yaml"
 	"github.com/fleetdm/fleet/server/kolide"
+	"github.com/ghodss/yaml"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 func specGroupFromPack(name string, inputPack kolide.PermissivePackContent) (*specGroup, error) {
@@ -66,30 +66,23 @@ func specGroupFromPack(name string, inputPack kolide.PermissivePackContent) (*sp
 	return specs, nil
 }
 
-func convertCommand() cli.Command {
+func convertCommand() *cli.Command {
 	var (
 		flFilename string
-		flDebug    bool
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:      "convert",
 		Usage:     "Convert osquery packs into decomposed fleet configs",
 		UsageText: `fleetctl convert [options]`,
 		Flags: []cli.Flag{
 			configFlag(),
 			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "f",
-				EnvVar:      "FILENAME",
+				EnvVars:     []string{"FILENAME"},
 				Value:       "",
 				Destination: &flFilename,
 				Usage:       "A file to apply",
-			},
-			cli.BoolFlag{
-				Name:        "debug",
-				EnvVar:      "DEBUG",
-				Destination: &flDebug,
-				Usage:       "Whether or not to enable debug logging",
 			},
 		},
 		Action: func(c *cli.Context) error {

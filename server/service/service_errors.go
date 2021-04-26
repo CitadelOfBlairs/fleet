@@ -1,6 +1,35 @@
 package service
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+)
+
+// ErrWithInternal is an interface for errors that include extra "internal"
+// information that should be logged in server logs but not sent to clients.
+type ErrWithInternal interface {
+	error
+	// Internal returns the error string that must only be logged internally,
+	// not returned to the client.
+	Internal() string
+}
+
+// ErrWithStatusCode is an interface for errors that should set a specific HTTP
+// status when encoding.
+type ErrWithStatusCode interface {
+	error
+	// StatusCode returns the HTTP status code that should be returned.
+	StatusCode() int
+}
+
+// ErrWithRetryAfter is an interface for errors that should set a specific HTTP
+// Header Retry-After value (see
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After)
+type ErrWithRetryAfter interface {
+	error
+	// RetryAfter returns the number of seconds to wait before retry.
+	RetryAfter() int
+}
 
 type invalidArgumentError []invalidArgument
 type invalidArgument struct {
@@ -57,24 +86,38 @@ func (e invalidArgumentError) Invalid() []map[string]string {
 	return invalid
 }
 
-// authentication error
-type authError struct {
-	reason string
-	// client reason is used to provide
-	// a different error message to the client
-	// when security is a concern
-	clientReason string
+type authFailedError struct {
+	// internal is the reason that should only be logged internally
+	internal string
 }
 
-func (e authError) Error() string {
-	return e.reason
+func (e authFailedError) Error() string {
+	return "Authentication failed"
 }
 
-func (e authError) AuthError() string {
-	if e.clientReason != "" {
-		return e.clientReason
-	}
-	return "username or email and password do not match"
+func (e authFailedError) Internal() string {
+	return e.internal
+}
+
+func (e authFailedError) StatusCode() int {
+	return http.StatusUnauthorized
+}
+
+type authRequiredError struct {
+	// internal is the reason that should only be logged internally
+	internal string
+}
+
+func (e authRequiredError) Error() string {
+	return "Authentication required"
+}
+
+func (e authRequiredError) Internal() string {
+	return e.internal
+}
+
+func (e authRequiredError) StatusCode() int {
+	return http.StatusUnauthorized
 }
 
 // permissionError, set when user is authenticated, but not allowed to perform action

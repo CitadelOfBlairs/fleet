@@ -12,14 +12,15 @@ import (
 	"strconv"
 	"testing"
 
-	kitlog "github.com/go-kit/kit/log"
-	kithttp "github.com/go-kit/kit/transport/http"
-	"github.com/gorilla/mux"
 	"github.com/fleetdm/fleet/server/config"
 	"github.com/fleetdm/fleet/server/datastore/inmem"
 	"github.com/fleetdm/fleet/server/kolide"
+	kitlog "github.com/go-kit/kit/log"
+	kithttp "github.com/go-kit/kit/transport/http"
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/throttled/throttled/store/memstore"
 )
 
 func TestLogin(t *testing.T) {
@@ -38,7 +39,8 @@ func TestLogin(t *testing.T) {
 		),
 	}
 	r := mux.NewRouter()
-	ke := MakeKolideServerEndpoints(svc, "CHANGEME", "")
+	limitStore, _ := memstore.New(0)
+	ke := MakeKolideServerEndpoints(svc, "CHANGEME", "", limitStore)
 	kh := makeKolideKitHandlers(ke, opts)
 	attachKolideAPIRoutes(r, kh)
 	r.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +92,7 @@ func TestLogin(t *testing.T) {
 		assert.Nil(t, err)
 
 		requestBody := &nopCloser{bytes.NewBuffer(j)}
-		resp, err := http.Post(server.URL+"/api/v1/kolide/login", "application/json", requestBody)
+		resp, err := http.Post(server.URL+"/api/v1/fleet/login", "application/json", requestBody)
 		require.Nil(t, err)
 		assert.Equal(t, tt.status, resp.StatusCode)
 
@@ -120,7 +122,7 @@ func TestLogin(t *testing.T) {
 		assert.NotEqual(t, "", sessions[0].Key)
 
 		// test logout
-		req, _ := http.NewRequest("POST", server.URL+"/api/v1/kolide/logout", nil)
+		req, _ := http.NewRequest("POST", server.URL+"/api/v1/fleet/logout", nil)
 		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", jsn.Token))
 		client := &http.Client{}
 		resp, err = client.Do(req)
@@ -143,11 +145,3 @@ type nopCloser struct {
 }
 
 func (nopCloser) Close() error { return nil }
-
-// helper to convert a bool pointer false
-func falseIfNil(b *bool) bool {
-	if b == nil {
-		return false
-	}
-	return *b
-}

@@ -1,4 +1,4 @@
-.PHONY: build
+.PHONY: build clean clean-assets e2e-reset-db e2e-serve e2e-setup
 
 export GO111MODULE=on
 
@@ -21,7 +21,7 @@ ifneq ($(OS), Windows_NT)
 
 	# To populate version metadata, we use unix tools to get certain data
 	GOVERSION = $(shell go version | awk '{print $$3}')
-	NOW	= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+	NOW	= $(shell date +"%Y-%m-%d")
 else
 	# The output binary name is different on Windows, so we're explicit here
 	OUTPUT = fleet.exe
@@ -29,7 +29,7 @@ else
 	# To populate version metadata, we use windows tools to get the certain data
 	GOVERSION_CMD = "(go version).Split()[2]"
 	GOVERSION = $(shell powershell $(GOVERSION_CMD))
-	NOW	= $(shell powershell Get-Date -format s)
+	NOW	= $(shell powershell Get-Date -format "yyy-MM-dd")
 endif
 
 ifndef CIRCLE_PR_NUMBER
@@ -40,10 +40,6 @@ endif
 
 ifdef CIRCLE_TAG
 	DOCKER_IMAGE_TAG = ${CIRCLE_TAG}
-endif
-
-ifndef MYSQL_PORT_3306_TCP_ADDR
-	MYSQL_PORT_3306_TCP_ADDR = 127.0.0.1
 endif
 
 KIT_VERSION = "\
@@ -66,7 +62,9 @@ define HELP_TEXT
 	make generate-go  - Generate and bundle required go code
 	make generate-js  - Generate and bundle required js code
 	make generate-dev - Generate and bundle required code in a watch loop
-	make distclean    - Delete all build artifacts
+
+    make clean        - Clean all build artifacts
+	make clean-assets - Clean assets only
 
 	make build        - Build the code
 	make package 	  - Build rpm and deb packages for linux
@@ -113,21 +111,15 @@ fleetctl: .prefix .pre-build .pre-fleetctl
 	CGO_ENABLED=0 go build -tags full -o build/fleetctl -ldflags ${KIT_VERSION} ./cmd/fleetctl
 
 lint-js:
-	yarn run eslint frontend --ext .js,.jsx
-
-lint-ts:
-	yarn run tslint frontend/**/*.tsx frontend/**/*.ts
-
-lint-scss:
-	yarn run sass-lint --verbose
+	yarn lint
 
 lint-go:
 	go vet ./...
 
-lint: lint-go lint-js lint-scss lint-ts
+lint: lint-go lint-js
 
 test-go:
-	go test -tags full ./...
+	go test -tags full -parallel 8 ./...
 
 analyze-go:
 	go test -tags full -race -cover ./...
@@ -137,13 +129,17 @@ test-js:
 
 test: lint test-go test-js
 
-generate: generate-js generate-go
+generate: clean-assets generate-js generate-go
 
-generate-js: .prefix
+generate-ci:
+	NODE_ENV=development webpack
+	make generate-go
+
+generate-js: clean-assets .prefix
 	NODE_ENV=production webpack --progress --colors
 
 generate-go: .prefix
-	go-bindata -pkg=bindata -tags full \
+	go run github.com/kevinburke/go-bindata/go-bindata -pkg=bindata -tags full \
 		-o=server/bindata/generated.go \
 		frontend/templates/ assets/... server/mail/templates
 
@@ -152,7 +148,7 @@ generate-go: .prefix
 # run webpack in watch mode to continuously re-generate the bundle
 generate-dev: .prefix
 	NODE_ENV=development webpack --progress --colors
-	go-bindata -debug -pkg=bindata -tags full \
+	go run github.com/kevinburke/go-bindata/go-bindata -debug -pkg=bindata -tags full \
 		-o=server/bindata/generated.go \
 		frontend/templates/ assets/... server/mail/templates
 	NODE_ENV=development webpack --progress --colors --watch
@@ -163,13 +159,12 @@ deps-js:
 	yarn
 
 deps-go:
-	GO111MODULE=off go get -u \
-		github.com/kolide/go-bindata/... \
-		github.com/golang/dep/cmd/dep \
-		github.com/groob/mockimpl
 	go mod download
 
-distclean:
+migration:
+	go run github.com/fleetdm/goose/cmd/goose -dir server/datastore/mysql/migrations/tables create $(name)
+
+clean: clean-assets
 ifeq ($(OS), Windows_NT)
 	if exist build rmdir /s/q build
 	if exist vendor rmdir /s/q vendor
@@ -178,6 +173,9 @@ else
 	rm -rf build vendor
 	rm -f assets/bundle.js
 endif
+
+clean-assets:
+	git clean -fx assets
 
 docker-build-release: xp-fleet xp-fleetctl
 	docker build -t "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}" .
@@ -194,17 +192,6 @@ docker-build-circle:
 	CGO_ENABLED=0 GOOS=linux go build -o build/linux/${OUTPUT} -ldflags ${KIT_VERSION} ./cmd/fleet
 	docker build -t "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}" .
 	docker push "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
-
-demo-dump:
-	mysqldump --extended-insert=FALSE --skip-dump-date \
-		-u kolide -p \
-		-h ${MYSQL_PORT_3306_TCP_ADDR} kolide \
-		> ./tools/app/demo.sql
-
-demo-restore:
-	mysql --binary-mode -u kolide -p \
-		-h ${MYSQL_PORT_3306_TCP_ADDR} kolide \
-		< ./tools/app/demo.sql
 
 .pre-binary-bundle:
 	rm -rf build/binary-bundle
@@ -229,3 +216,16 @@ binary-bundle: xp-fleet xp-fleetctl
 	cd build/binary-bundle && cp windows/fleetctl.exe . && zip fleetctl.exe.zip fleetctl.exe 
 	cd build/binary-bundle && shasum -a 256 fleet.zip fleetctl.exe.zip fleetctl-macos.tar.gz fleetctl-windows.tar.gz fleetctl-linux.tar.gz
 
+# Drop, create, and migrate the e2e test database
+e2e-reset-db:
+	docker-compose exec -T mysql_test bash -c 'echo "drop database if exists e2e; create database e2e;" | mysql -uroot -ptoor'
+	./build/fleet prepare db --mysql_address=localhost:3307  --mysql_username=root --mysql_password=toor --auth_jwt_key=insecure --mysql_database=e2e 
+
+e2e-setup:
+	./build/fleetctl config set --context e2e --address https://localhost:8642
+	./build/fleetctl config set --context e2e --tls-skip-verify true
+	./build/fleetctl setup --context e2e --email=test@fleetdm.com --username=test --password=admin123# --org-name='Fleet Test'
+	./build/fleetctl user create --context e2e --username=user1 --email=user1@example.com --sso=true
+
+e2e-serve:
+	./build/fleet serve --mysql_address=localhost:3307 --mysql_username=root --mysql_password=toor --auth_jwt_key=insecure --mysql_database=e2e --server_address=localhost:8642

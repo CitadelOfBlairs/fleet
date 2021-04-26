@@ -1,3 +1,106 @@
+## Fleet 3.10.1 (Apr 6, 2021)
+
+* Fix a frontend bug that prevented the "Pack" page and "Edit pack" page from rendering in the Fleet UI. This issue occurred when the `platform` key, in the requested pack's configuration, was set to any value other than `darwin`, `linux`, `windows`, or `all`.
+
+## Fleet 3.10.0 (Mar 31, 2021)
+
+* Add `fleetctl` agent auto-updates beta which introduces the ability to self-manage an agent update server. Available for Fleet Basic customers.
+
+* Add option for Identity Provider-Initiated (IdP-initiated) Single Sign-On (SSO).
+
+* Improve logging. All errors are logged regardless of log level, some non-errors are logged regardless of log level (agent enrollments, runs of live queries etc.), and all other non-errors are logged on debug level.
+
+* Improve login resilience by adding rate-limiting to login and password reset attempts and preventing user enumeration.
+
+* Add Fleet version and Go version in the My Account page of the Fleet UI.
+
+* Improvements to `fleetctl preview` that ensure the latest version of Fleet is fired up on every run. In addition, the Fleet UI is now accessible without having to click through browser security warning messages.
+
+* Prefer storing IPv4 addresses for host details.
+
+## Fleet 3.9.0 (Mar 9, 2021)
+
+* Add configurable host identifier to help with duplicate host enrollment scenarios. By default, Fleet's behavior does not change (it uses the identifier configured in osquery's `--host_identifier` flag), but for users with overlapping host UUIDs changing `--osquery_host_identifier` to `instance` may be helpful. 
+
+* Make cool-down period for host enrollment configurable to control load on the database in scenarios in which hosts are using the same identifier. By default, the cooldown is off, reverting to the behavior of Fleet <=3.4.0. The cooldown can be enabled with `--osquery_enroll_cooldown`.
+
+* Refresh the Fleet UI with a new layout and horizontal navigation bar.
+
+* Trim down the size of Fleet binaries.
+
+* Improve handling of config_refresh values from osquery clients.
+
+* Fix an issue with IP addresses and host additional info dropping.
+
+## Fleet 3.8.0 (Feb 25, 2021)
+
+* Add search, sort, and column selection in the hosts dashboard.
+
+* Add AWS Lambda logging plugin.
+
+* Improve messaging about number of hosts responding to live query.
+
+* Update host listing API endpoints to support search.
+
+* Fixes to the `fleetctl preview` experience.
+
+* Fix `denylist` parameter in scheduled queries.
+
+* Fix an issue with errors table rendering on live query page.
+
+* Deprecate `KOLIDE_` environment variable prefixes in favor of `FLEET_` prefixes. Deprecated prefixes continue to work and the Fleet server will log warnings if the deprecated variable names are used. 
+
+* Deprecate `/api/v1/kolide` routes in favor of `/api/v1/fleet`. Deprecated routes continue to work and the Fleet server will log warnings if the deprecated routes are used. 
+
+* Add Javascript source maps for development.
+
+## Fleet 3.7.1 (Feb 3, 2021)
+
+* Change the default `--server_tls_compatibility` to `intermediate`. The new settings caused TLS connectivity issues for users in some environments. This new default is a more appropriate balance of security and compatibility, as recommended by Mozilla.
+
+## Fleet 3.7.0 (Feb 3, 2021)
+
+### This is a security release.
+
+* **Security**: Fixed a vulnerability in which a malicious actor with a valid node key can send a badly formatted request that causes the Fleet server to exit, resulting in denial of service. See https://github.com/fleetdm/fleet/security/advisories/GHSA-xwh8-9p3f-3x45 and the linked content within that advisory.
+
+* Add new Host details page which includes a rich view of a specific host’s attributes.
+
+* Reveal live query errors in the Fleet UI and `fleetctl` to help target and diagnose hosts that fail.
+
+* Add Helm chart to make it easier for users to deploy to Kubernetes.
+
+* Add support for `denylist` parameter in scheduled queries.
+
+* Add debug flag to `fleetctl` that enables logging of HTTP requests and responses to stderr.
+
+* Improvements to the `fleetctl preview` experience that include adding containerized osquery agents, displaying login information, creating a default directory, and checking for Docker daemon status.
+
+* Add improved error handling in host enrollment to make debugging issues with the enrollment process easier.
+
+* Upgrade TLS compatibility settings to match Mozilla.
+
+* Add comments in generated flagfile to add clarity to different features being configured.
+
+* Fix a bug in Fleet UI that allowed user to edit a scheduled query after it had been deleted from a pack.
+
+
+## Fleet 3.6.0 (Jan 7, 2021)
+
+* Add the option to set up an S3 bucket as the storage backend for file carving.
+
+* Build Docker container with Fleet running as non-root user.
+
+* Add support to read in the MySQL password and JWT key from a file.
+
+* Improve the `fleetctl preview` experience by automatically completing the setup process and configuring fleetctl for users.
+
+* Restructure the documentation into three top-level sections titled "Using Fleet," "Deployment," and "Contribution."
+
+* Fix a bug that allowed hosts to enroll with an empty enroll secret in new installations before setup was completed.
+
+* Fix a bug that made the query editor render strangely in Safari.
+
 ## Fleet 3.5.1 (Dec 14, 2020)
 
 ### This is a security release.
@@ -353,7 +456,7 @@ to 2.0.0.
 
 ## Kolide Fleet 2.0.0 (currently preparing for release)
 
-The primary new addition in Fleet 2 is the new `fleetctl` CLI and file-format, which dramatically increases the flexibility and control that administrators have over their osquery deployment. The CLI and the file format are documented [in the Fleet documentation](https://github.com/kolide/fleet/blob/master/docs/cli/README.md).
+The primary new addition in Fleet 2 is the new `fleetctl` CLI and file-format, which dramatically increases the flexibility and control that administrators have over their osquery deployment. The CLI and the file format are documented [in the Fleet documentation](https://github.com/fleetdm/fleet/blob/master/docs/1-Using-Fleet/2-fleetctl-CLI.md).
 
 ### New Features
 

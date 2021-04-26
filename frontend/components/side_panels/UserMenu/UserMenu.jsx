@@ -1,13 +1,13 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import classnames from 'classnames';
+import React, { Component } from "react";
+import PropTypes from "prop-types";
 
-import Icon from 'components/icons/Icon';
-import PATHS from 'router/paths';
+import PATHS from "router/paths";
+
+import DropdownButton from "components/buttons/DropdownButton";
+import Avatar from "../../Avatar";
 
 class UserMenu extends Component {
   static propTypes = {
-    pathname: PropTypes.string,
     onLogout: PropTypes.func,
     onNavItemClick: PropTypes.func,
     user: PropTypes.shape({
@@ -22,30 +22,43 @@ class UserMenu extends Component {
     isOpened: false,
   };
 
-  render () {
-    const { pathname, onLogout, onNavItemClick } = this.props;
+  constructor(props) {
+    super(props);
 
-    const baseClass = 'user-menu';
-    const userMenuClass = classnames(baseClass);
-
-    let settingsActive;
-    if (pathname.replace('/', '') === 'settings') settingsActive = true;
-    const settingsNavItemBaseClass = classnames(
-      `${baseClass}__nav-item`,
+    const accountNavigate = props.onNavItemClick(PATHS.USER_SETTINGS);
+    this.dropdownItems = [
       {
-        [`${baseClass}__nav-item--active`]: settingsActive,
+        label: "My account",
+        onClick: accountNavigate,
       },
-    );
+      {
+        label: "Documentation",
+        onClick: () =>
+          window.open(
+            "https://github.com/fleetdm/fleet/blob/master/docs/README.md",
+            "_blank"
+          ),
+      },
+      {
+        label: "Sign out",
+        onClick: props.onLogout,
+      },
+    ];
+  }
+
+  render() {
+    const { user } = this.props;
+    const baseClass = "user-menu";
 
     return (
-      <div className={userMenuClass}>
-        <nav className={`${baseClass}__nav`}>
-          <ul className={`${baseClass}__nav-list`}>
-            <li className={settingsNavItemBaseClass}><a href="#settings" onClick={onNavItemClick(PATHS.USER_SETTINGS)}><Icon name="main-settings-white" size="24" /><span>Account</span></a></li>
-            <li className={`${baseClass}__nav-item`}><a href="https://github.com/fleetdm/fleet/blob/master/docs/README.md" target="_blank" rel="noreferrer"><Icon name="main-help-white" size="24" /><span>Help</span></a></li>
-            <li className={`${baseClass}__nav-item`}><a href="#logout" onClick={onLogout}><Icon name="main-logout-white" size="24" /><span>Log out</span></a></li>
-          </ul>
-        </nav>
+      <div className={baseClass}>
+        <DropdownButton options={this.dropdownItems}>
+          <Avatar
+            className={`${baseClass}__avatar-image`}
+            user={user}
+            size="small"
+          />
+        </DropdownButton>
       </div>
     );
   }

@@ -9,7 +9,7 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 const (
@@ -35,20 +35,20 @@ func configFlag() cli.Flag {
 		homeDir = "~"
 	}
 	defaultConfigPath := filepath.Join(homeDir, ".fleet", "config")
-	return cli.StringFlag{
-		Name:   "config",
-		Value:  defaultConfigPath,
-		EnvVar: "CONFIG",
-		Usage:  "Path to the Fleet config file",
+	return &cli.StringFlag{
+		Name:    "config",
+		Value:   defaultConfigPath,
+		EnvVars: []string{"CONFIG"},
+		Usage:   "Path to the fleetctl config file",
 	}
 }
 
 func contextFlag() cli.Flag {
-	return cli.StringFlag{
-		Name:   "context",
-		Value:  "default",
-		EnvVar: "CONTEXT",
-		Usage:  "Name of Fleet config context to use",
+	return &cli.StringFlag{
+		Name:    "context",
+		Value:   "default",
+		EnvVars: []string{"CONTEXT"},
+		Usage:   "Name of fleetctl config context to use",
 	}
 }
 
@@ -63,20 +63,23 @@ func makeConfigIfNotExists(fp string) error {
 	return err
 }
 
-func readConfig(fp string) (c configFile, err error) {
+func readConfig(fp string) (configFile, error) {
+	var c configFile
 	b, err := ioutil.ReadFile(fp)
 	if err != nil {
-		return
+		return c, err
 	}
 
-	err = yaml.Unmarshal(b, &c)
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		return c, errors.Wrap(err, "unmarshal config")
+	}
 
 	if c.Contexts == nil {
 		c.Contexts = map[string]Context{
 			"default": Context{},
 		}
 	}
-	return
+	return c, nil
 }
 
 func writeConfig(fp string, c configFile) error {
@@ -88,27 +91,19 @@ func writeConfig(fp string, c configFile) error {
 	return ioutil.WriteFile(fp, b, configFilePerms)
 }
 
-func getConfigValue(c *cli.Context, key string) (interface{}, error) {
-	var (
-		flContext string
-		flConfig  string
-	)
-
-	flConfig = c.String("config")
-	flContext = c.String("context")
-
-	if err := makeConfigIfNotExists(flConfig); err != nil {
-		return nil, errors.Wrapf(err, "error verifying that config exists at %s", flConfig)
+func getConfigValue(configPath, context, key string) (interface{}, error) {
+	if err := makeConfigIfNotExists(configPath); err != nil {
+		return nil, errors.Wrapf(err, "error verifying that config exists at %s", configPath)
 	}
 
-	config, err := readConfig(flConfig)
+	config, err := readConfig(configPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error reading config at %s", flConfig)
+		return nil, errors.Wrapf(err, "error reading config at %s", configPath)
 	}
 
-	currentContext, ok := config.Contexts[flContext]
+	currentContext, ok := config.Contexts[context]
 	if !ok {
-		fmt.Printf("[+] Context %q not found, creating it with default values\n", flContext)
+		fmt.Printf("[+] Context %q not found, creating it with default values\n", context)
 		currentContext = Context{}
 	}
 
@@ -134,27 +129,19 @@ func getConfigValue(c *cli.Context, key string) (interface{}, error) {
 	}
 }
 
-func setConfigValue(c *cli.Context, key, value string) error {
-	var (
-		flContext string
-		flConfig  string
-	)
-
-	flConfig = c.String("config")
-	flContext = c.String("context")
-
-	if err := makeConfigIfNotExists(flConfig); err != nil {
-		return errors.Wrapf(err, "error verifying that config exists at %s", flConfig)
+func setConfigValue(configPath, context, key, value string) error {
+	if err := makeConfigIfNotExists(configPath); err != nil {
+		return errors.Wrapf(err, "error verifying that config exists at %s", configPath)
 	}
 
-	config, err := readConfig(flConfig)
+	config, err := readConfig(configPath)
 	if err != nil {
-		return errors.Wrapf(err, "error reading config at %s", flConfig)
+		return errors.Wrapf(err, "error reading config at %s", configPath)
 	}
 
-	currentContext, ok := config.Contexts[flContext]
+	currentContext, ok := config.Contexts[context]
 	if !ok {
-		fmt.Printf("[+] Context %q not found, creating it with default values\n", flContext)
+		fmt.Printf("[+] Context %q not found, creating it with default values\n", context)
 		currentContext = Context{}
 	}
 
@@ -179,16 +166,16 @@ func setConfigValue(c *cli.Context, key, value string) error {
 		return fmt.Errorf("%q is an invalid option", key)
 	}
 
-	config.Contexts[flContext] = currentContext
+	config.Contexts[context] = currentContext
 
-	if err := writeConfig(flConfig, config); err != nil {
+	if err := writeConfig(configPath, config); err != nil {
 		return errors.Wrap(err, "error saving config file")
 	}
 
 	return nil
 }
 
-func configSetCommand() cli.Command {
+func configSetCommand() *cli.Command {
 	var (
 		flAddress       string
 		flEmail         string
@@ -197,50 +184,50 @@ func configSetCommand() cli.Command {
 		flRootCA        string
 		flURLPrefix     string
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:      "set",
 		Usage:     "Set config options",
 		UsageText: `fleetctl config set [options]`,
 		Flags: []cli.Flag{
 			configFlag(),
 			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "address",
-				EnvVar:      "ADDRESS",
+				EnvVars:     []string{"ADDRESS"},
 				Value:       "",
 				Destination: &flAddress,
 				Usage:       "Address of the Fleet server",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "email",
-				EnvVar:      "EMAIL",
+				EnvVars:     []string{"EMAIL"},
 				Value:       "",
 				Destination: &flEmail,
 				Usage:       "Email to use when connecting to the Fleet server",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "token",
-				EnvVar:      "TOKEN",
+				EnvVars:     []string{"TOKEN"},
 				Value:       "",
 				Destination: &flToken,
 				Usage:       "Fleet API token",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:        "tls-skip-verify",
-				EnvVar:      "INSECURE",
+				EnvVars:     []string{"INSECURE"},
 				Destination: &flTLSSkipVerify,
 				Usage:       "Skip TLS certificate validation",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "rootca",
-				EnvVar:      "ROOTCA",
+				EnvVars:     []string{"ROOTCA"},
 				Value:       "",
 				Destination: &flRootCA,
 				Usage:       "Specify RootCA chain used to communicate with fleet",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "url-prefix",
-				EnvVar:      "URL_PREFIX",
+				EnvVars:     []string{"URL_PREFIX"},
 				Value:       "",
 				Destination: &flURLPrefix,
 				Usage:       "Specify URL Prefix to use with Fleet server (copy from server configuration)",
@@ -249,9 +236,11 @@ func configSetCommand() cli.Command {
 		Action: func(c *cli.Context) error {
 			set := false
 
+			configPath, context := c.String("config"), c.String("context")
+
 			if flAddress != "" {
 				set = true
-				if err := setConfigValue(c, "address", flAddress); err != nil {
+				if err := setConfigValue(configPath, context, "address", flAddress); err != nil {
 					return errors.Wrap(err, "error setting address")
 				}
 				fmt.Printf("[+] Set the address config key to %q in the %q context\n", flAddress, c.String("context"))
@@ -259,7 +248,7 @@ func configSetCommand() cli.Command {
 
 			if flEmail != "" {
 				set = true
-				if err := setConfigValue(c, "email", flEmail); err != nil {
+				if err := setConfigValue(configPath, context, "email", flEmail); err != nil {
 					return errors.Wrap(err, "error setting email")
 				}
 				fmt.Printf("[+] Set the email config key to %q in the %q context\n", flEmail, c.String("context"))
@@ -267,7 +256,7 @@ func configSetCommand() cli.Command {
 
 			if flToken != "" {
 				set = true
-				if err := setConfigValue(c, "token", flToken); err != nil {
+				if err := setConfigValue(configPath, context, "token", flToken); err != nil {
 					return errors.Wrap(err, "error setting token")
 				}
 				fmt.Printf("[+] Set the token config key to %q in the %q context\n", flToken, c.String("context"))
@@ -275,7 +264,7 @@ func configSetCommand() cli.Command {
 
 			if flTLSSkipVerify {
 				set = true
-				if err := setConfigValue(c, "tls-skip-verify", "true"); err != nil {
+				if err := setConfigValue(configPath, context, "tls-skip-verify", "true"); err != nil {
 					return errors.Wrap(err, "error setting tls-skip-verify")
 				}
 				fmt.Printf("[+] Set the tls-skip-verify config key to \"true\" in the %q context\n", c.String("context"))
@@ -283,7 +272,7 @@ func configSetCommand() cli.Command {
 
 			if flRootCA != "" {
 				set = true
-				if err := setConfigValue(c, "rootca", flRootCA); err != nil {
+				if err := setConfigValue(configPath, context, "rootca", flRootCA); err != nil {
 					return errors.Wrap(err, "error setting rootca")
 				}
 				fmt.Printf("[+] Set the rootca config key to %q in the %q context\n", flRootCA, c.String("context"))
@@ -291,7 +280,7 @@ func configSetCommand() cli.Command {
 
 			if flURLPrefix != "" {
 				set = true
-				if err := setConfigValue(c, "url-prefix", flURLPrefix); err != nil {
+				if err := setConfigValue(configPath, context, "url-prefix", flURLPrefix); err != nil {
 					return errors.Wrap(err, "error setting URL Prefix")
 				}
 				fmt.Printf("[+] Set the url-prefix config key to %q in the %q context\n", flURLPrefix, c.String("context"))
@@ -306,8 +295,8 @@ func configSetCommand() cli.Command {
 	}
 }
 
-func configGetCommand() cli.Command {
-	return cli.Command{
+func configGetCommand() *cli.Command {
+	return &cli.Command{
 		Name:      "get",
 		Usage:     "Get a config option",
 		UsageText: `fleetctl config get [options]`,
@@ -316,11 +305,11 @@ func configGetCommand() cli.Command {
 			contextFlag(),
 		},
 		Action: func(c *cli.Context) error {
-			if len(c.Args()) != 1 {
+			if c.Args().Len() != 1 {
 				return cli.ShowCommandHelp(c, "get")
 			}
 
-			key := c.Args()[0]
+			key := c.Args().Get(0)
 
 			// validate key
 			switch key {
@@ -329,7 +318,9 @@ func configGetCommand() cli.Command {
 				return cli.ShowCommandHelp(c, "get")
 			}
 
-			value, err := getConfigValue(c, key)
+			configPath, context := c.String("config"), c.String("context")
+
+			value, err := getConfigValue(configPath, context, key)
 			if err != nil {
 				return errors.Wrap(err, "error getting config value")
 			}

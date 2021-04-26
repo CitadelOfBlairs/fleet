@@ -35,6 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
+	"github.com/throttled/throttled/store/redigostore"
 	"google.golang.org/grpc"
 )
 
@@ -49,6 +50,8 @@ type initializer interface {
 func createServeCmd(configManager config.Manager) *cobra.Command {
 	// Whether to enable the debug endpoints
 	debug := false
+	// Whether to enable developer options
+	dev := false
 
 	serveCmd := &cobra.Command{
 		Use:   "serve",
@@ -63,6 +66,10 @@ the way that the Fleet server works.
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 			config := configManager.LoadConfig()
+
+			if dev {
+				applyDevFlags(&config)
+			}
 
 			var logger kitlog.Logger
 			{
@@ -101,6 +108,16 @@ the way that the Fleet server works.
 					"msg", "using osquery.enable_log_rotation value for filesystem.result_log_file",
 				)
 				config.Filesystem.EnableLogRotation = config.Osquery.EnableLogRotation
+			}
+
+			allowedHostIdentifiers := map[string]bool{
+				"provided": true,
+				"instance": true,
+				"uuid":     true,
+				"hostname": true,
+			}
+			if !allowedHostIdentifiers[config.Osquery.HostIdentifier] {
+				initFatal(errors.Errorf("%s is not a valid value for osquery_host_identifier", config.Osquery.HostIdentifier), "set host identifier")
 			}
 
 			if len(config.Server.URLPrefix) > 0 {
@@ -163,14 +180,26 @@ the way that the Fleet server works.
 				os.Exit(1)
 			}
 
-			if config.Auth.JwtKey == "" {
+			if config.Auth.JwtKey != "" && config.Auth.JwtKeyPath != "" {
+				initFatal(err, "A JWT key and a JWT key file were provided - please specify only one")
+			}
+
+			if config.Auth.JwtKeyPath != "" {
+				fileContents, err := ioutil.ReadFile(config.Auth.JwtKeyPath)
+				if err != nil {
+					initFatal(err, "Could not read the JWT Key file provided")
+				}
+				config.Auth.JwtKey = strings.TrimSpace(string(fileContents))
+			}
+
+			if config.Auth.JwtKey == "" && config.Auth.JwtKeyPath == "" {
 				jwtKey, err := kolide.RandomText(24)
 				if err != nil {
 					initFatal(err, "generating sample jwt key")
 				}
 				fmt.Printf("################################################################################\n"+
 					"# ERROR:\n"+
-					"#   A value must be supplied for --auth_jwt_key. This value is used to create\n"+
+					"#   A value must be supplied for --auth_jwt_key or --auth_jwt_key_path. This value is used to create\n"+
 					"#   session tokens for users.\n"+
 					"#\n"+
 					"#   Consider using the following randomly generated key:\n"+
@@ -206,6 +235,20 @@ the way that the Fleet server works.
 				}
 			}()
 
+			// Flush seen hosts every second
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				for {
+					if err := svc.FlushSeenHosts(context.Background()); err != nil {
+						level.Info(logger).Log(
+							"err", err,
+							"msg", "failed to update host seen times",
+						)
+					}
+					<-ticker.C
+				}
+			}()
+
 			fieldKeys := []string{"method", "error"}
 			requestCount := kitprometheus.NewCounterFrom(prometheus.CounterOpts{
 				Namespace: "api",
@@ -221,15 +264,21 @@ the way that the Fleet server works.
 			}, fieldKeys)
 
 			svcLogger := kitlog.With(logger, "component", "service")
+
 			svc = service.NewLoggingService(svc, svcLogger)
 			svc = service.NewMetricsService(svc, requestCount, requestLatency)
 
 			httpLogger := kitlog.With(logger, "component", "http")
 
+			limiterStore, err := redigostore.New(redisPool, "ratelimit::", 0)
+			if err != nil {
+				initFatal(err, "initialize rate limit store")
+			}
+
 			var apiHandler, frontendHandler http.Handler
 			{
 				frontendHandler = prometheus.InstrumentHandler("get_frontend", service.ServeFrontend(config.Server.URLPrefix, httpLogger))
-				apiHandler = service.MakeHandler(svc, config, httpLogger)
+				apiHandler = service.MakeHandler(svc, config, httpLogger, limiterStore)
 
 				setupRequired, err := service.RequireSetup(svc)
 				if err != nil {
@@ -276,11 +325,11 @@ the way that the Fleet server works.
 			rootMux.Handle("/", frontendHandler)
 			rootMux.Handle("/debug/", service.MakeDebugHandler(svc, config, logger))
 
-			if path, ok := os.LookupEnv("KOLIDE_TEST_PAGE_PATH"); ok {
+			if path, ok := os.LookupEnv("FLEET_TEST_PAGE_PATH"); ok {
 				// test that we can load this
 				_, err := ioutil.ReadFile(path)
 				if err != nil {
-					initFatal(err, "loading KOLIDE_TEST_PAGE_PATH")
+					initFatal(err, "loading FLEET_TEST_PAGE_PATH")
 				}
 				rootMux.HandleFunc("/test", func(rw http.ResponseWriter, req *http.Request) {
 					testPage, err := ioutil.ReadFile(path)
@@ -350,6 +399,7 @@ the way that the Fleet server works.
 	}
 
 	serveCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug endpoints")
+	serveCmd.PersistentFlags().BoolVar(&dev, "dev", false, "Enable developer options")
 
 	return serveCmd
 }
@@ -357,7 +407,7 @@ the way that the Fleet server works.
 // Support for TLS security profiles, we set up the TLS configuation based on
 // value supplied to server_tls_compatibility command line flag. The default
 // profile is 'modern'.
-// See https://wiki.mozilla.org/Security/Server_Side_TLS
+// See https://wiki.mozilla.org/index.php?title=Security/Server_Side_TLS&oldid=1229478
 func getTLSConfig(profile string) *tls.Config {
 	cfg := tls.Config{
 		PreferServerCipherSuites: true,
@@ -365,44 +415,39 @@ func getTLSConfig(profile string) *tls.Config {
 
 	switch profile {
 	case config.TLSProfileModern:
-		cfg.MinVersion = tls.VersionTLS12
+		cfg.MinVersion = tls.VersionTLS13
 		cfg.CurvePreferences = append(cfg.CurvePreferences,
+			tls.X25519,
 			tls.CurveP256,
 			tls.CurveP384,
-			tls.CurveP521,
-			tls.X25519,
 		)
 		cfg.CipherSuites = append(cfg.CipherSuites,
+			tls.TLS_AES_128_GCM_SHA256,
+			tls.TLS_AES_256_GCM_SHA384,
+			tls.TLS_CHACHA20_POLY1305_SHA256,
+			// These cipher suites not explicitly listed by Mozilla, but
+			// required by Go's HTTP/2 implementation
+			// See: https://go-review.googlesource.com/c/net/+/200317/
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		)
+	case config.TLSProfileIntermediate:
+		cfg.MinVersion = tls.VersionTLS12
+		cfg.CurvePreferences = append(cfg.CurvePreferences,
+			tls.X25519,
+			tls.CurveP256,
+			tls.CurveP384,
+		)
+		cfg.CipherSuites = append(cfg.CipherSuites,
+			tls.TLS_AES_128_GCM_SHA256,
+			tls.TLS_AES_256_GCM_SHA384,
+			tls.TLS_CHACHA20_POLY1305_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		)
-	case config.TLSProfileIntermediate:
-		cfg.MinVersion = tls.VersionTLS10
-		cfg.CurvePreferences = append(cfg.CurvePreferences,
-			tls.CurveP256,
-			tls.CurveP384,
-			tls.CurveP521,
-			tls.X25519,
-		)
-		cfg.CipherSuites = append(cfg.CipherSuites,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
-			tls.TLS_RSA_WITH_RC4_128_SHA,
-			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 		)
 	default:
 		initFatal(

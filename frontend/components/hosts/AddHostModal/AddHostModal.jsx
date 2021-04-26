@@ -1,17 +1,16 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import FileSaver from 'file-saver';
+import React, { Component } from "react";
+import PropTypes from "prop-types";
+import FileSaver from "file-saver";
 
-import Kolide from 'kolide';
-import Button from 'components/buttons/Button';
-import configInterface from 'interfaces/config';
-import enrollSecretInterface from 'interfaces/enroll_secret';
-import EnrollSecretTable from 'components/config/EnrollSecretTable';
-import KolideIcon from 'components/icons/KolideIcon';
-import DownloadIcon from '../../../../assets/images/icon-download-12x12@2x.png';
+import Kolide from "kolide";
+import Button from "components/buttons/Button";
+import configInterface from "interfaces/config";
+import enrollSecretInterface from "interfaces/enroll_secret";
+import EnrollSecretTable from "components/config/EnrollSecretTable";
+import KolideIcon from "components/icons/KolideIcon";
+import DownloadIcon from "../../../../assets/images/icon-download-12x12@2x.png";
 
-const baseClass = 'add-host-modal';
-
+const baseClass = "add-host-modal";
 
 class AddHostModal extends Component {
   static propTypes = {
@@ -26,12 +25,16 @@ class AddHostModal extends Component {
   }
 
   componentDidMount() {
-    Kolide.config.loadCertificate()
+    Kolide.config
+      .loadCertificate()
       .then((certificate) => {
         this.setState({ certificate });
       })
       .catch(() => {
-        this.setState({ fetchCertificateError: 'Failed to load certificate. Is Fleet App URL configured properly?' });
+        this.setState({
+          fetchCertificateError:
+            "Failed to load certificate. Is Fleet App URL configured properly?",
+        });
       });
   }
 
@@ -40,20 +43,18 @@ class AddHostModal extends Component {
 
     const { certificate } = this.state;
 
-    const filename = 'fleet.pem';
-    const file = new global.window.File([certificate], filename, { type: 'application/x-pem-file' });
+    const filename = "fleet.pem";
+    const file = new global.window.File([certificate], filename, {
+      type: "application/x-pem-file",
+    });
 
     FileSaver.saveAs(file);
 
     return false;
-  }
+  };
 
   render() {
-    const {
-      config,
-      onReturnToApp,
-      enrollSecret,
-    } = this.props;
+    const { config, onReturnToApp, enrollSecret } = this.props;
 
     const { fetchCertificateError } = this.state;
 
@@ -70,23 +71,34 @@ class AddHostModal extends Component {
       }
     }
 
-    const flagfileContent = `--enroll_secret_path=secret.txt
---tls_server_certs=fleet.pem
+    const flagfileContent = `# Server
 --tls_hostname=${tlsHostname}
+--tls_server_certs=fleet.pem
+
+# Enrollment
 --host_identifier=instance
+--enroll_secret_path=secret.txt
 --enroll_tls_endpoint=/api/v1/osquery/enroll
+
+# Configuration
 --config_plugin=tls
 --config_tls_endpoint=/api/v1/osquery/config
 --config_refresh=10
+
+# Live query
 --disable_distributed=false
 --distributed_plugin=tls
 --distributed_interval=10
 --distributed_tls_max_attempts=3
 --distributed_tls_read_endpoint=/api/v1/osquery/distributed/read
 --distributed_tls_write_endpoint=/api/v1/osquery/distributed/write
+
+# Logging
 --logger_plugin=tls
 --logger_tls_endpoint=/api/v1/osquery/log
 --logger_tls_period=10
+
+# File carving
 --disable_carver=false
 --carver_start_endpoint=/api/v1/osquery/carve/begin
 --carver_continue_endpoint=/api/v1/osquery/carve/block
@@ -95,7 +107,7 @@ class AddHostModal extends Component {
     const onDownloadFlagfile = (evt) => {
       evt.preventDefault();
 
-      const filename = 'flagfile.txt';
+      const filename = "flagfile.txt";
       const file = new global.window.File([flagfileContent], filename);
 
       FileSaver.saveAs(file);
@@ -109,7 +121,7 @@ class AddHostModal extends Component {
           <div className={`${baseClass}__documentation-link`}>
             <h4>
               <a
-                href="https://github.com/fleetdm/fleet/blob/master/docs/infrastructure/adding-hosts-to-fleet.md"
+                href="https://github.com/fleetdm/fleet/blob/master/docs/2-Deployment/3-Adding-hosts.md"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -119,43 +131,67 @@ class AddHostModal extends Component {
           </div>
           <ol className={`${baseClass}__install-steps`}>
             <li>
-              <h4><span className={`${baseClass}__step-number`}>1</span>Enroll secret</h4>
+              <h4>
+                <span className={`${baseClass}__step-number`}>1</span>Enroll
+                secret
+              </h4>
               <p>
-                Provide an active enroll secret to allow osquery to authenticate with the Fleet server:
+                Provide an active enroll secret to allow osquery to authenticate
+                with the Fleet server:
               </p>
               <div className={`${baseClass}__secret-wrapper`}>
                 <EnrollSecretTable secrets={enrollSecret} />
               </div>
             </li>
             <li>
-              <h4><span className={`${baseClass}__step-number`}>2</span>Server certificate</h4>
+              <h4>
+                <span className={`${baseClass}__step-number`}>2</span>Server
+                certificate
+              </h4>
               <p>
-                Provide the TLS certificate used by the Fleet server to enable secure connections from osquery:
+                Provide the TLS certificate used by the Fleet server to enable
+                secure connections from osquery:
               </p>
               <p>
-                { fetchCertificateError
-                  ? <span className={`${baseClass}__error`}>{fetchCertificateError}</span>
-                  : <a href="#downloadCertificate" onClick={this.onFetchCertificate}>Download
+                {fetchCertificateError ? (
+                  <span className={`${baseClass}__error`}>
+                    {fetchCertificateError}
+                  </span>
+                ) : (
+                  <a
+                    href="#downloadCertificate"
+                    onClick={this.onFetchCertificate}
+                  >
+                    Download
                     <img src={DownloadIcon} alt="download icon" />
                   </a>
-                }
+                )}
               </p>
             </li>
             <li>
-              <h4><span className={`${baseClass}__step-number`}>3</span>Flagfile</h4>
+              <h4>
+                <span className={`${baseClass}__step-number`}>3</span>Flagfile
+              </h4>
               <p>
-                If using the enroll secret and server certificate downloaded above, use the generated flagfile. In some configurations, modifications may need to be made:
+                If using the enroll secret and server certificate downloaded
+                above, use the generated flagfile. In some configurations,
+                modifications may need to be made:
               </p>
               <p>
-                <a href="#downloadFlagfile" onClick={onDownloadFlagfile}>Download
+                <a href="#downloadFlagfile" onClick={onDownloadFlagfile}>
+                  Download
                   <img src={DownloadIcon} alt="download icon" />
                 </a>
               </p>
             </li>
             <li>
-              <h4><span className={`${baseClass}__step-number`}>4</span>Run osquery</h4>
+              <h4>
+                <span className={`${baseClass}__step-number`}>4</span>Run
+                osquery
+              </h4>
               <p>
-                Run osquery from the directory containing the above files (may require sudo or Run as Administrator privileges):
+                Run osquery from the directory containing the above files (may
+                require sudo or Run as Administrator privileges):
               </p>
               <pre>osqueryd --flagfile=flagfile.txt --verbose</pre>
             </li>

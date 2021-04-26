@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
 	hostctx "github.com/fleetdm/fleet/server/contexts/host"
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/fleetdm/fleet/server/pubsub"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/spf13/cast"
 )
@@ -63,11 +64,14 @@ func (svc service) AuthenticateHost(ctx context.Context, nodeKey string) (*kolid
 		}
 	}
 
-	// Update the "seen" time used to calculate online status
-	err = svc.ds.MarkHostSeen(host, svc.clock.Now())
-	if err != nil {
-		return nil, osqueryError{message: "failed to mark host seen: " + err.Error()}
-	}
+	// Update the "seen" time used to calculate online status. These updates are
+	// batched for MySQL performance reasons. Because this is done
+	// asynchronously, it is possible for the server to shut down before
+	// updating the seen time for these hosts. This seems to be an acceptable
+	// tradeoff as an online host will continue to check in and quickly be
+	// marked online again.
+	svc.seenHostSet.addHostID(host.ID)
+	host.SeenTime = svc.clock.Now()
 
 	return host, nil
 }
@@ -89,7 +93,9 @@ func (svc service) EnrollAgent(ctx context.Context, enrollSecret, hostIdentifier
 		}
 	}
 
-	host, err := svc.ds.EnrollHost(hostIdentifier, nodeKey, secretName)
+	hostIdentifier = getHostIdentifier(svc.logger, svc.config.Osquery.HostIdentifier, hostIdentifier, hostDetails)
+
+	host, err := svc.ds.EnrollHost(hostIdentifier, nodeKey, secretName, svc.config.Osquery.EnrollCooldown)
 	if err != nil {
 		return "", osqueryError{message: "save enroll failed: " + err.Error(), nodeInvalid: true}
 	}
@@ -115,6 +121,73 @@ func (svc service) EnrollAgent(ctx context.Context, enrollSecret, hostIdentifier
 	}
 
 	return host.NodeKey, nil
+}
+
+func getHostIdentifier(logger log.Logger, identifierOption, providedIdentifier string, details map[string](map[string]string)) string {
+	switch identifierOption {
+	case "provided":
+		// Use the host identifier already provided in the request.
+		return providedIdentifier
+
+	case "instance":
+		r, ok := details["osquery_info"]
+		if !ok {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing osquery_info",
+				"identifier", "instance",
+			)
+		} else if r["instance_id"] == "" {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing instance_id in osquery_info",
+				"identifier", "instance",
+			)
+		} else {
+			return r["instance_id"]
+		}
+
+	case "uuid":
+		r, ok := details["osquery_info"]
+		if !ok {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing osquery_info",
+				"identifier", "uuid",
+			)
+		} else if r["uuid"] == "" {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing instance_id in osquery_info",
+				"identifier", "uuid",
+			)
+		} else {
+			return r["uuid"]
+		}
+
+	case "hostname":
+		r, ok := details["system_info"]
+		if !ok {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing system_info",
+				"identifier", "hostname",
+			)
+		} else if r["hostname"] == "" {
+			level.Info(logger).Log(
+				"msg", "could not get host identifier",
+				"reason", "missing instance_id in system_info",
+				"identifier", "hostname",
+			)
+		} else {
+			return r["hostname"]
+		}
+
+	default:
+		panic("Unknown option for host_identifier: " + identifierOption)
+	}
+
+	return providedIdentifier
 }
 
 func (svc service) GetClientConfig(ctx context.Context) (map[string]interface{}, error) {
@@ -158,6 +231,7 @@ func (svc service) GetClientConfig(ctx context.Context) (map[string]interface{},
 				Version:  query.Version,
 				Removed:  query.Removed,
 				Shard:    query.Shard,
+				Denylist: query.Denylist,
 			}
 
 			if query.Removed != nil {
@@ -187,11 +261,8 @@ func (svc service) GetClientConfig(ctx context.Context) (map[string]interface{},
 		config["packs"] = json.RawMessage(packJSON)
 	}
 
-	// Save interval values if they have been updated. Note
-	// config_tls_refresh can only be set in the osquery flags so is
-	// ignored here.
+	// Save interval values if they have been updated.
 	saveHost := false
-
 	if options, ok := config["options"].(map[string]interface{}); ok {
 		distributedIntervalVal, ok := options["distributed_interval"]
 		distributedInterval, err := cast.ToUintE(distributedIntervalVal)
@@ -204,6 +275,16 @@ func (svc service) GetClientConfig(ctx context.Context) (map[string]interface{},
 		loggerTLSPeriod, err := cast.ToUintE(loggerTLSPeriodVal)
 		if ok && err == nil && host.LoggerTLSPeriod != loggerTLSPeriod {
 			host.LoggerTLSPeriod = loggerTLSPeriod
+			saveHost = true
+		}
+
+		// Note config_tls_refresh can only be set in the osquery flags (and has
+		// also been deprecated in osquery for quite some time) so is ignored
+		// here.
+		configRefreshVal, ok := options["config_refresh"]
+		configRefresh, err := cast.ToUintE(configRefreshVal)
+		if ok && err == nil && host.ConfigTLSRefresh != configRefresh {
+			host.ConfigTLSRefresh = configRefresh
 			saveHost = true
 		}
 	}
@@ -235,19 +316,19 @@ func (svc service) SubmitResultLogs(ctx context.Context, logs []json.RawMessage)
 // hostLabelQueryPrefix is appended before the query name when a query is
 // provided as a label query. This allows the results to be retrieved when
 // osqueryd writes the distributed query results.
-const hostLabelQueryPrefix = "kolide_label_query_"
+const hostLabelQueryPrefix = "fleet_label_query_"
 
 // hostDetailQueryPrefix is appended before the query name when a query is
 // provided as a detail query.
-const hostDetailQueryPrefix = "kolide_detail_query_"
+const hostDetailQueryPrefix = "fleet_detail_query_"
 
 // hostAdditionalQueryPrefix is appended before the query name when a query is
 // provided as an additional query (additional info for hosts to retrieve).
-const hostAdditionalQueryPrefix = "kolide_additional_query_"
+const hostAdditionalQueryPrefix = "fleet_additional_query_"
 
 // hostDistributedQueryPrefix is appended before the query name when a query is
 // run from a distributed query campaign
-const hostDistributedQueryPrefix = "kolide_distributed_query_"
+const hostDistributedQueryPrefix = "fleet_distributed_query_"
 
 // detailQueries defines the detail queries that should be run on the host, as
 // well as how the results of those queries should be ingested into the
@@ -268,6 +349,9 @@ var detailQueries = map[string]struct {
 				return nil
 			}
 
+			// Rows are ordered by traffic, so we will get the most active
+			// interface by iterating in order
+			var firstIPv4, firstIPv6 map[string]string
 			for _, row := range rows {
 				ip := net.ParseIP(row["address"])
 				if ip == nil {
@@ -279,17 +363,35 @@ var detailQueries = map[string]struct {
 					continue
 				}
 
-				// Rows are ordered by traffic, so we will get the most active
-				// interface by iterating in order
-				host.PrimaryIP = row["address"]
-				host.PrimaryMac = row["mac"]
-				return nil
+				if strings.Contains(row["address"], ":") {
+					//IPv6
+					if firstIPv6 == nil {
+						firstIPv6 = row
+					}
+				} else {
+					// IPv4
+					if firstIPv4 == nil {
+						firstIPv4 = row
+					}
+				}
 			}
 
+			var selected map[string]string
+			switch {
+			// Prefer IPv4
+			case firstIPv4 != nil:
+				selected = firstIPv4
+			// Otherwise IPv6
+			case firstIPv6 != nil:
+				selected = firstIPv6
 			// If only link-local and loopback found, still use the first
-			// interface.
-			host.PrimaryIP = rows[0]["address"]
-			host.PrimaryMac = rows[0]["mac"]
+			// interface so that we don't get an empty value.
+			default:
+				selected = rows[0]
+			}
+
+			host.PrimaryIP = selected["address"]
+			host.PrimaryMac = selected["mac"]
 			return nil
 		},
 	},
@@ -337,6 +439,7 @@ var detailQueries = map[string]struct {
 		Query: `select name, value from osquery_flags where name in ("distributed_interval", "config_tls_refresh", "config_refresh", "logger_tls_period")`,
 		IngestFunc: func(logger log.Logger, host *kolide.Host, rows []map[string]string) error {
 			var configTLSRefresh, configRefresh uint
+			var configRefreshSeen, configTLSRefreshSeen bool
 			for _, row := range rows {
 				switch row["name"] {
 
@@ -355,6 +458,7 @@ var detailQueries = map[string]struct {
 						return errors.Wrap(err, "parsing config_tls_refresh")
 					}
 					configTLSRefresh = uint(interval)
+					configTLSRefreshSeen = true
 
 				case "config_refresh":
 					// After 2.4.6 `config_tls_refresh` was
@@ -364,6 +468,7 @@ var detailQueries = map[string]struct {
 						return errors.Wrap(err, "parsing config_refresh")
 					}
 					configRefresh = uint(interval)
+					configRefreshSeen = true
 
 				case "logger_tls_period":
 					interval, err := strconv.Atoi(emptyToZero(row["value"]))
@@ -378,9 +483,9 @@ var detailQueries = map[string]struct {
 			// 2.4.6 and had a different meaning, we prefer
 			// `config_tls_refresh` if it was set, and use
 			// `config_refresh` as a fallback.
-			if configTLSRefresh != 0 {
+			if configTLSRefreshSeen {
 				host.ConfigTLSRefresh = configTLSRefresh
-			} else {
+			} else if configRefreshSeen {
 				host.ConfigTLSRefresh = configRefresh
 			}
 
@@ -567,7 +672,7 @@ func (svc service) ingestLabelQuery(host kolide.Host, query string, rows []map[s
 
 // ingestDistributedQuery takes the results of a distributed query and modifies the
 // provided kolide.Host appropriately.
-func (svc service) ingestDistributedQuery(host kolide.Host, name string, rows []map[string]string, failed bool) error {
+func (svc service) ingestDistributedQuery(host kolide.Host, name string, rows []map[string]string, failed bool, errMsg string) error {
 	trimmedQuery := strings.TrimPrefix(name, hostDistributedQueryPrefix)
 
 	campaignID, err := strconv.Atoi(emptyToZero(trimmedQuery))
@@ -582,10 +687,7 @@ func (svc service) ingestDistributedQuery(host kolide.Host, name string, rows []
 		Rows:                       rows,
 	}
 	if failed {
-		// osquery errors are not currently helpful, but we should fix
-		// them to be better in the future
-		errString := "failed"
-		res.Error = &errString
+		res.Error = &errMsg
 	}
 
 	err = svc.resultStore.WriteResult(res)
@@ -632,11 +734,25 @@ func (svc service) ingestDistributedQuery(host kolide.Host, name string, rows []
 	return nil
 }
 
-func (svc service) SubmitDistributedQueryResults(ctx context.Context, results kolide.OsqueryDistributedQueryResults, statuses map[string]kolide.OsqueryStatus) error {
+func (svc service) SubmitDistributedQueryResults(ctx context.Context, results kolide.OsqueryDistributedQueryResults, statuses map[string]kolide.OsqueryStatus, messages map[string]string) error {
 	host, ok := hostctx.FromContext(ctx)
 
 	if !ok {
 		return osqueryError{message: "internal error: missing host from request context"}
+	}
+
+	// Check for label queries and if so, load host additional. If we don't do
+	// this, we will end up unintentionally dropping any existing host
+	// additional info.
+	for query, _ := range results {
+		if strings.HasPrefix(query, hostLabelQueryPrefix) {
+			fullHost, err := svc.ds.Host(host.ID)
+			if err != nil {
+				return osqueryError{message: "internal error: load host additional: " + err.Error()}
+			}
+			host = *fullHost
+			break
+		}
 	}
 
 	var err error
@@ -659,7 +775,7 @@ func (svc service) SubmitDistributedQueryResults(ctx context.Context, results ko
 			// status indicates a query error
 			status, ok := statuses[query]
 			failed := (ok && status != kolide.StatusOK)
-			err = svc.ingestDistributedQuery(host, query, rows, failed)
+			err = svc.ingestDistributedQuery(host, query, rows, failed, messages[query])
 		default:
 			err = osqueryError{message: "unknown query prefix: " + query}
 		}
@@ -667,7 +783,6 @@ func (svc service) SubmitDistributedQueryResults(ctx context.Context, results ko
 		if err != nil {
 			return osqueryError{message: "failed to ingest result: " + err.Error()}
 		}
-
 	}
 
 	if len(labelResults) > 0 {

@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-kit/kit/endpoint"
-	kitlog "github.com/go-kit/kit/log"
-	"github.com/igm/sockjs-go/v3/sockjs"
 	"github.com/fleetdm/fleet/server/contexts/viewer"
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/fleetdm/fleet/server/websocket"
+	"github.com/go-kit/kit/endpoint"
+	kitlog "github.com/go-kit/kit/log"
+	"github.com/igm/sockjs-go/v3/sockjs"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -78,10 +78,15 @@ func makeStreamDistributedQueryCampaignResultsHandler(svc kolide.Service, jwtKey
 	opt := sockjs.DefaultOptions
 	opt.Websocket = true
 	opt.RawWebsocket = true
-	return sockjs.NewHandler("/api/v1/kolide/results", opt, func(session sockjs.Session) {
-		defer session.Close(0, "none")
-
+	return sockjs.NewHandler("/api/v1/fleet/results", opt, func(session sockjs.Session) {
 		conn := &websocket.Conn{Session: session}
+		defer func() {
+			if p := recover(); p != nil {
+				logger.Log("err", p, "msg", "panic in result handler")
+				conn.WriteJSONError("panic in result handler")
+			}
+			session.Close(0, "none")
+		}()
 
 		// Receive the auth bearer token
 		token, err := conn.ReadAuthToken()

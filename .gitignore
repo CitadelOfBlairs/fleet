@@ -29,3 +29,18 @@ tmp/
 
 # test mysql server data
 mysqldata/
+
+# test helm charts
+helm-temp
+
+#editors
+.vscode
+.idea
+
+# Cypress e2e testing
+cypress/screenshots
+cypress/videos
+cypress/downloads
+
+# Fleet local development DB backups
+backup.sql.gz

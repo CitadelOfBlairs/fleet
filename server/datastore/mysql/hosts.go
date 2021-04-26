@@ -11,6 +11,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var hostSearchColumns = []string{"host_name", "uuid", "hardware_serial", "primary_ip"}
+
 func (d *Datastore) NewHost(host *kolide.Host) (*kolide.Host, error) {
 	sqlStatement := `
 	INSERT INTO hosts (
@@ -211,21 +213,25 @@ func (d *Datastore) ListHosts(opt kolide.HostListOptions) ([]*kolide.Host, error
 	}
 
 	sql += `FROM hosts
+WHERE TRUE
     `
 	switch opt.StatusFilter {
 	case "new":
-		sql += "WHERE DATE_ADD(created_at, INTERVAL 1 DAY) >= ?"
+		sql += "AND DATE_ADD(created_at, INTERVAL 1 DAY) >= ?"
 		params = append(params, time.Now())
 	case "online":
-		sql += fmt.Sprintf("WHERE DATE_ADD(seen_time, INTERVAL LEAST(distributed_interval, config_tls_refresh) + %d SECOND) > ?", kolide.OnlineIntervalBuffer)
+		sql += fmt.Sprintf("AND DATE_ADD(seen_time, INTERVAL LEAST(distributed_interval, config_tls_refresh) + %d SECOND) > ?", kolide.OnlineIntervalBuffer)
 		params = append(params, time.Now())
 	case "offline":
-		sql += fmt.Sprintf("WHERE DATE_ADD(seen_time, INTERVAL LEAST(distributed_interval, config_tls_refresh) + %d SECOND) <= ? AND DATE_ADD(seen_time, INTERVAL 30 DAY) >= ?", kolide.OnlineIntervalBuffer)
+		sql += fmt.Sprintf("AND DATE_ADD(seen_time, INTERVAL LEAST(distributed_interval, config_tls_refresh) + %d SECOND) <= ? AND DATE_ADD(seen_time, INTERVAL 30 DAY) >= ?", kolide.OnlineIntervalBuffer)
 		params = append(params, time.Now(), time.Now())
 	case "mia":
-		sql += "WHERE DATE_ADD(seen_time, INTERVAL 30 DAY) <= ?"
+		sql += "AND DATE_ADD(seen_time, INTERVAL 30 DAY) <= ?"
 		params = append(params, time.Now())
 	}
+
+	sql, params = searchLike(sql, params, opt.MatchQuery, hostSearchColumns...)
+
 	sql = appendListOptionsToSQL(sql, opt.ListOptions)
 
 	hosts := []*kolide.Host{}
@@ -283,7 +289,7 @@ func (d *Datastore) GenerateHostStatusStatistics(now time.Time) (online, offline
 }
 
 // EnrollHost enrolls a host
-func (d *Datastore) EnrollHost(osqueryHostID, nodeKey, secretName string) (*kolide.Host, error) {
+func (d *Datastore) EnrollHost(osqueryHostID, nodeKey, secretName string, cooldown time.Duration) (*kolide.Host, error) {
 	if osqueryHostID == "" {
 		return nil, fmt.Errorf("missing osquery host identifier")
 	}
@@ -294,7 +300,11 @@ func (d *Datastore) EnrollHost(osqueryHostID, nodeKey, secretName string) (*koli
 
 		var id int64
 		err := tx.Get(&host, `SELECT id, last_enroll_time FROM hosts WHERE osquery_host_id = ?`, osqueryHostID)
-		if err != nil {
+		switch {
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return errors.Wrap(err, "check existing")
+
+		case errors.Is(err, sql.ErrNoRows):
 			// Create new host record
 			sqlInsert := `
 				INSERT INTO hosts (
@@ -313,11 +323,12 @@ func (d *Datastore) EnrollHost(osqueryHostID, nodeKey, secretName string) (*koli
 			}
 
 			id, _ = result.LastInsertId()
-		} else {
+
+		default:
 			// Prevent hosts from enrolling too often with the same identifier.
 			// Prior to adding this we saw many hosts (probably VMs) with the
 			// same identifier competing for enrollment and causing perf issues.
-			if time.Since(host.LastEnrollTime) < kolide.HostEnrollCooldown {
+			if cooldown > 0 && time.Since(host.LastEnrollTime) < cooldown {
 				return backoff.Permanent(fmt.Errorf("host identified by %s enrolling too often", osqueryHostID))
 			}
 			id = int64(host.ID)
@@ -359,6 +370,7 @@ func (d *Datastore) EnrollHost(osqueryHostID, nodeKey, secretName string) (*koli
 }
 
 func (d *Datastore) AuthenticateHost(nodeKey string) (*kolide.Host, error) {
+	// Select everything besides `additional`
 	sqlStatement := `
 		SELECT
 			id,
@@ -393,6 +405,8 @@ func (d *Datastore) AuthenticateHost(nodeKey string) (*kolide.Host, error) {
 			distributed_interval,
 			logger_tls_period,
 			config_tls_refresh,
+			primary_ip,
+			primary_mac,
 			enroll_secret_name
 		FROM hosts
 		WHERE node_key = ?
@@ -425,6 +439,34 @@ func (d *Datastore) MarkHostSeen(host *kolide.Host, t time.Time) error {
 	}
 
 	host.UpdatedAt = t
+	return nil
+}
+
+func (d *Datastore) MarkHostsSeen(hostIDs []uint, t time.Time) error {
+	if len(hostIDs) == 0 {
+		return nil
+	}
+
+	if err := d.withRetryTxx(func(tx *sqlx.Tx) error {
+		query := `
+		UPDATE hosts SET
+			seen_time = ?
+		WHERE id IN (?)
+	`
+		query, args, err := sqlx.In(query, t, hostIDs)
+		if err != nil {
+			return errors.Wrap(err, "sqlx in")
+		}
+		query = d.db.Rebind(query)
+		if _, err := d.db.Exec(query, args...); err != nil {
+			return errors.Wrap(err, "exec update")
+		}
+
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "MarkHostsSeen transaction")
+	}
+
 	return nil
 }
 

@@ -6,40 +6,41 @@ import (
 
 	"github.com/fleetdm/fleet/server/service"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-func loginCommand() cli.Command {
+func loginCommand() *cli.Command {
 	var (
 		flEmail    string
 		flPassword string
 	)
-	return cli.Command{
+	return &cli.Command{
 		Name:  "login",
-		Usage: "Login to Kolide Fleet",
+		Usage: "Login to Fleet",
 		UsageText: `
 fleetctl login [options]
 
 Interactively prompts for email and password if not specified in the flags or environment variables.
 `,
 		Flags: []cli.Flag{
-			configFlag(),
-			contextFlag(),
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "email",
-				EnvVar:      "EMAIL",
+				EnvVars:     []string{"EMAIL"},
 				Value:       "",
 				Destination: &flEmail,
-				Usage:       "Email to use to log in",
+				Usage:       "Email or username to use to log in",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:        "password",
-				EnvVar:      "PASSWORD",
+				EnvVars:     []string{"PASSWORD"},
 				Value:       "",
 				Destination: &flPassword,
 				Usage:       "Password to use to log in (recommended to use interactive entry)",
 			},
+			configFlag(),
+			contextFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			fleet, err := unauthenticatedClientFromCLI(c)
@@ -51,7 +52,7 @@ Interactively prompts for email and password if not specified in the flags or en
 			// CLI history.
 			if flEmail == "" {
 				fmt.Println("Log in using the standard Fleet credentials.")
-				fmt.Print("Email: ")
+				fmt.Print("Email/Username: ")
 				_, err := fmt.Scanln(&flEmail)
 				if err != nil {
 					return errors.Wrap(err, "error reading email")
@@ -70,19 +71,19 @@ Interactively prompts for email and password if not specified in the flags or en
 			token, err := fleet.Login(flEmail, flPassword)
 			if err != nil {
 				switch err.(type) {
-				case service.InvalidLoginErr:
-					return err
 				case service.NotSetupErr:
 					return err
 				}
-				return errors.Wrap(err, "error logging in")
+				return errors.Wrap(err, "Login failed")
 			}
 
-			if err := setConfigValue(c, "email", flEmail); err != nil {
+			configPath, context := c.String("config"), c.String("context")
+
+			if err := setConfigValue(configPath, context, "email", flEmail); err != nil {
 				return errors.Wrap(err, "error setting email for the current context")
 			}
 
-			if err := setConfigValue(c, "token", token); err != nil {
+			if err := setConfigValue(configPath, context, "token", token); err != nil {
 				return errors.Wrap(err, "error setting token for the current context")
 			}
 

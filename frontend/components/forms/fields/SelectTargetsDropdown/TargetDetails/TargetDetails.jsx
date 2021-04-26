@@ -1,15 +1,15 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import { noop } from 'lodash';
-import AceEditor from 'react-ace';
-import classnames from 'classnames';
+import React, { Component } from "react";
+import PropTypes from "prop-types";
+import { noop } from "lodash";
+import AceEditor from "react-ace";
+import classnames from "classnames";
 
-import hostHelpers from 'components/hosts/HostsTable/helpers';
-import Icon from 'components/icons/Icon';
-import PlatformIcon from 'components/icons/PlatformIcon';
-import targetInterface from 'interfaces/target';
+import { humanHostMemory } from "kolide/helpers";
+import KolideIcon from "components/icons/KolideIcon";
+import PlatformIcon from "components/icons/PlatformIcon";
+import targetInterface from "interfaces/target";
 
-const baseClass = 'target-details';
+const baseClass = "target-details";
 
 class TargetDetails extends Component {
   static propTypes = {
@@ -29,7 +29,10 @@ class TargetDetails extends Component {
 
     if (online > 0) {
       return (
-        <span className={`${labelBaseClass}__hosts-online`}> ({percentOnline}% ONLINE)</span>
+        <span className={`${labelBaseClass}__hosts-online`}>
+          {" "}
+          ({percentOnline}% ONLINE)
+        </span>
       );
     }
 
@@ -48,28 +51,42 @@ class TargetDetails extends Component {
       platform,
       status,
     } = target;
-    const hostBaseClass = 'host-target';
-    const isOnline = status === 'online';
-    const isOffline = status === 'offline';
+    const hostBaseClass = "host-target";
+    const isOnline = status === "online";
+    const isOffline = status === "offline";
     const statusClassName = classnames(
       `${hostBaseClass}__status`,
       { [`${hostBaseClass}__status--is-online`]: isOnline },
-      { [`${hostBaseClass}__status--is-offline`]: isOffline },
+      { [`${hostBaseClass}__status--is-offline`]: isOffline }
     );
 
     return (
       <div className={`${hostBaseClass} ${className}`}>
-        <button className={`button button--unstyled ${hostBaseClass}__back`} onClick={handleBackToResults}>
-          <Icon name="chevronleft" />Back
+        <button
+          className={`button button--unstyled ${hostBaseClass}__back`}
+          onClick={handleBackToResults}
+        >
+          <KolideIcon name="chevronleft" />
+          Back
         </button>
 
         <p className={`${hostBaseClass}__display-text`}>
-          <Icon name="single-host" fw className={`${hostBaseClass}__icon`} />
+          <KolideIcon name="single-host" className={`${hostBaseClass}__icon`} />
           <span>{displayText}</span>
         </p>
         <p className={statusClassName}>
-          {isOnline && <Icon name="success-check" fw className={`${hostBaseClass}__icon ${hostBaseClass}__icon--online`} />}
-          {isOffline && <Icon name="offline" fw className={`${hostBaseClass}__icon ${hostBaseClass}__icon--offline`} />}
+          {isOnline && (
+            <KolideIcon
+              name="success-check"
+              className={`${hostBaseClass}__icon ${hostBaseClass}__icon--online`}
+            />
+          )}
+          {isOffline && (
+            <KolideIcon
+              name="offline"
+              className={`${hostBaseClass}__icon ${hostBaseClass}__icon--offline`}
+            />
+          )}
           <span>{status}</span>
         </p>
         <table className={`${baseClass}__table`}>
@@ -80,13 +97,20 @@ class TargetDetails extends Component {
             </tr>
             <tr>
               <th>MAC Address</th>
-              <td><span className={`${hostBaseClass}__mac-address`}>{hostMac}</span></td>
+              <td>
+                <span className={`${hostBaseClass}__mac-address`}>
+                  {hostMac}
+                </span>
+              </td>
             </tr>
             <tr>
               <th>Platform</th>
               <td>
                 <PlatformIcon name={platform} title={platform} />
-                <span className={`${hostBaseClass}__platform-text`}> {platform}</span>
+                <span className={`${hostBaseClass}__platform-text`}>
+                  {" "}
+                  {platform}
+                </span>
               </td>
             </tr>
             <tr>
@@ -99,13 +123,13 @@ class TargetDetails extends Component {
             </tr>
             <tr>
               <th>Memory</th>
-              <td>{hostHelpers.humanMemory(memory)}</td>
+              <td>{humanHostMemory(memory)}</td>
             </tr>
           </tbody>
         </table>
       </div>
     );
-  }
+  };
 
   renderLabel = () => {
     const { onlineHosts } = this;
@@ -118,27 +142,34 @@ class TargetDetails extends Component {
       online,
       query,
     } = target;
-    const labelBaseClass = 'label-target';
+    const labelBaseClass = "label-target";
 
     return (
       <div className={`${labelBaseClass} ${className}`}>
-        <button className={`button button--unstyled ${labelBaseClass}__back`} onClick={handleBackToResults}>
-          <Icon name="chevronleft" /> Back
+        <button
+          className={`button button--unstyled ${labelBaseClass}__back`}
+          onClick={handleBackToResults}
+        >
+          <KolideIcon name="chevronleft" /> Back
         </button>
 
         <p className={`${labelBaseClass}__display-text`}>
-          <Icon name="label" fw className={`${labelBaseClass}__icon`} />
+          <KolideIcon name="label" fw className={`${labelBaseClass}__icon`} />
           <span>{displayText}</span>
         </p>
 
         <p className={`${labelBaseClass}__hosts`}>
-          <span className={`${labelBaseClass}__hosts-count`}><strong>{count}</strong>HOSTS</span>
-          { onlineHosts(labelBaseClass, count, online) }
+          <span className={`${labelBaseClass}__hosts-count`}>
+            <strong>{count}</strong>HOSTS
+          </span>
+          {onlineHosts(labelBaseClass, count, online)}
         </p>
 
-        <p className={`${labelBaseClass}__description`}>{description || 'No Description'}</p>
+        <p className={`${labelBaseClass}__description`}>
+          {description || "No Description"}
+        </p>
 
-        {labelType !== 1 &&
+        {labelType !== 1 && (
           <div className={`${labelBaseClass}__editor`}>
             <AceEditor
               editorProps={{ $blockScrolling: Infinity }}
@@ -156,12 +187,12 @@ class TargetDetails extends Component {
               fontSize={14}
             />
           </div>
-        }
+        )}
       </div>
     );
-  }
+  };
 
-  render () {
+  render() {
     const { target } = this.props;
 
     if (!target) {
@@ -171,7 +202,7 @@ class TargetDetails extends Component {
     const { target_type: targetType } = target;
     const { renderHost, renderLabel } = this;
 
-    if (targetType === 'labels') {
+    if (targetType === "labels") {
       return renderLabel();
     }
 

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	envPrefix = "KOLIDE"
+	envPrefix = "FLEET"
 )
 
 // MysqlConfig defines configs related to MySQL
@@ -21,6 +21,7 @@ type MysqlConfig struct {
 	Address         string
 	Username        string
 	Password        string
+	PasswordPath    string `yaml:"password_path"`
 	Database        string
 	TLSCert         string `yaml:"tls_cert"`
 	TLSKey          string `yaml:"tls_key"`
@@ -52,13 +53,14 @@ type ServerConfig struct {
 	Cert       string
 	Key        string
 	TLS        bool
-	TLSProfile string
+	TLSProfile string // TODO #271 set `yaml:"tls_compatibility"`
 	URLPrefix  string `yaml:"url_prefix"`
 }
 
 // AuthConfig defines configs related to user authorization
 type AuthConfig struct {
 	JwtKey      string `yaml:"jwt_key"`
+	JwtKeyPath  string `yaml:"jwt_key_path"`
 	BcryptCost  int    `yaml:"bcrypt_cost"`
 	SaltKeySize int    `yaml:"salt_key_size"`
 }
@@ -78,6 +80,8 @@ type SessionConfig struct {
 // OsqueryConfig defines configs related to osquery
 type OsqueryConfig struct {
 	NodeKeySize          int           `yaml:"node_key_size"`
+	HostIdentifier       string        `yaml:"host_identifier"`
+	EnrollCooldown       time.Duration `yaml:"enroll_cooldown"`
 	StatusLogPlugin      string        `yaml:"status_log_plugin"`
 	ResultLogPlugin      string        `yaml:"result_log_plugin"`
 	LabelUpdateInterval  time.Duration `yaml:"label_update_interval"`
@@ -112,6 +116,16 @@ type KinesisConfig struct {
 	StsAssumeRoleArn string `yaml:"sts_assume_role_arn"`
 	StatusStream     string `yaml:"status_stream"`
 	ResultStream     string `yaml:"result_stream"`
+}
+
+// LambdaConfig defines configs for the AWS Lambda logging plugin
+type LambdaConfig struct {
+	Region           string
+	AccessKeyID      string `yaml:"access_key_id"`
+	SecretAccessKey  string `yaml:"secret_access_key"`
+	StsAssumeRoleArn string `yaml:"sts_assume_role_arn"`
+	StatusFunction   string `yaml:"status_function"`
+	ResultFunction   string `yaml:"result_function"`
 }
 
 // S3Config defines config to enable file carving storage to an S3 bucket
@@ -153,6 +167,7 @@ type KolideConfig struct {
 	Logging    LoggingConfig
 	Firehose   FirehoseConfig
 	Kinesis    KinesisConfig
+	Lambda     LambdaConfig
 	S3         S3Config
 	PubSub     PubSubConfig
 	Filesystem FilesystemConfig
@@ -168,8 +183,10 @@ func (man Manager) addConfigs() {
 		"MySQL server address (host:port)")
 	man.addConfigString("mysql.username", "kolide",
 		"MySQL server username")
-	man.addConfigString("mysql.password", "kolide",
+	man.addConfigString("mysql.password", "",
 		"MySQL server password (prefer env variable for security)")
+	man.addConfigString("mysql.password_path", "",
+		"Path to file containg MySQL server password")
 	man.addConfigString("mysql.database", "kolide",
 		"MySQL database name")
 	man.addConfigString("mysql.tls_cert", "",
@@ -204,7 +221,7 @@ func (man Manager) addConfigs() {
 		"Fleet TLS key path")
 	man.addConfigBool("server.tls", true,
 		"Enable TLS (required for osqueryd communication)")
-	man.addConfigString(TLSProfileKey, TLSProfileModern,
+	man.addConfigString(TLSProfileKey, TLSProfileIntermediate,
 		fmt.Sprintf("TLS security profile choose one of %s or %s",
 			TLSProfileModern, TLSProfileIntermediate))
 	man.addConfigString("server.url_prefix", "",
@@ -213,6 +230,8 @@ func (man Manager) addConfigs() {
 	// Auth
 	man.addConfigString("auth.jwt_key", "",
 		"JWT session token key (required)")
+	man.addConfigString("auth.jwt_key_path", "",
+		"Path to file containg JWT session token key")
 	man.addConfigInt("auth.bcrypt_cost", 12,
 		"Bcrypt iterations")
 	man.addConfigInt("auth.salt_key_size", 24,
@@ -235,6 +254,10 @@ func (man Manager) addConfigs() {
 	// Osquery
 	man.addConfigInt("osquery.node_key_size", 24,
 		"Size of generated osqueryd node keys")
+	man.addConfigString("osquery.host_identifier", "provided",
+		"Identifier used to uniquely determine osquery clients")
+	man.addConfigDuration("osquery.enroll_cooldown", 0,
+		"Cooldown period for duplicate host enrollment (default off)")
 	man.addConfigString("osquery.status_log_plugin", "filesystem",
 		"Log plugin to use for status logs")
 	man.addConfigString("osquery.result_log_plugin", "filesystem",
@@ -280,6 +303,17 @@ func (man Manager) addConfigs() {
 	man.addConfigString("kinesis.result_stream", "",
 		"Kinesis stream name for result logs")
 
+	// Lambda
+	man.addConfigString("lambda.region", "", "AWS Region to use")
+	man.addConfigString("lambda.access_key_id", "", "Access Key ID for AWS authentication")
+	man.addConfigString("lambda.secret_access_key", "", "Secret Access Key for AWS authentication")
+	man.addConfigString("lambda.sts_assume_role_arn", "",
+		"ARN of role to assume for AWS")
+	man.addConfigString("lambda.status_function", "",
+		"Lambda function name for status logs")
+	man.addConfigString("lambda.result_function", "",
+		"Lambda function name for result logs")
+
 	// S3 for file carving
 	man.addConfigString("s3.bucket", "", "Bucket where to store file carves")
 	man.addConfigString("s3.prefix", "", "Prefix under which carves are stored")
@@ -306,6 +340,29 @@ func (man Manager) addConfigs() {
 // LoadConfig will load the config variables into a fully initialized
 // KolideConfig struct
 func (man Manager) LoadConfig() KolideConfig {
+	// Shim old style environment variables with a warning
+	// TODO #260 remove this on major version release
+	haveLogged := false
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "KOLIDE_") {
+			splits := strings.SplitN(e, "=", 2)
+			if len(splits) != 2 {
+				panic("env " + e + " does not contain 2 splits")
+			}
+
+			key, val := splits[0], splits[1]
+
+			if !haveLogged {
+				fmt.Println("Environment variables prefixed with KOLIDE_ are deprecated. Please migrate to FLEET_ prefixes.`")
+				haveLogged = true
+			}
+
+			if err := os.Setenv("FLEET"+strings.TrimPrefix(key, "KOLIDE"), val); err != nil {
+				panic(err)
+			}
+		}
+	}
+
 	man.loadConfigFile()
 
 	return KolideConfig{
@@ -314,6 +371,7 @@ func (man Manager) LoadConfig() KolideConfig {
 			Address:         man.getConfigString("mysql.address"),
 			Username:        man.getConfigString("mysql.username"),
 			Password:        man.getConfigString("mysql.password"),
+			PasswordPath:    man.getConfigString("mysql.password_path"),
 			Database:        man.getConfigString("mysql.database"),
 			TLSCert:         man.getConfigString("mysql.tls_cert"),
 			TLSKey:          man.getConfigString("mysql.tls_key"),
@@ -340,6 +398,7 @@ func (man Manager) LoadConfig() KolideConfig {
 		},
 		Auth: AuthConfig{
 			JwtKey:      man.getConfigString("auth.jwt_key"),
+			JwtKeyPath:  man.getConfigString("auth.jwt_key_path"),
 			BcryptCost:  man.getConfigInt("auth.bcrypt_cost"),
 			SaltKeySize: man.getConfigInt("auth.salt_key_size"),
 		},
@@ -353,6 +412,8 @@ func (man Manager) LoadConfig() KolideConfig {
 		},
 		Osquery: OsqueryConfig{
 			NodeKeySize:          man.getConfigInt("osquery.node_key_size"),
+			HostIdentifier:       man.getConfigString("osquery.host_identifier"),
+			EnrollCooldown:       man.getConfigDuration("osquery.enroll_cooldown"),
 			StatusLogPlugin:      man.getConfigString("osquery.status_log_plugin"),
 			ResultLogPlugin:      man.getConfigString("osquery.result_log_plugin"),
 			StatusLogFile:        man.getConfigString("osquery.status_log_file"),
@@ -381,6 +442,14 @@ func (man Manager) LoadConfig() KolideConfig {
 			StatusStream:     man.getConfigString("kinesis.status_stream"),
 			ResultStream:     man.getConfigString("kinesis.result_stream"),
 			StsAssumeRoleArn: man.getConfigString("kinesis.sts_assume_role_arn"),
+		},
+		Lambda: LambdaConfig{
+			Region:           man.getConfigString("lambda.region"),
+			AccessKeyID:      man.getConfigString("lambda.access_key_id"),
+			SecretAccessKey:  man.getConfigString("lambda.secret_access_key"),
+			StatusFunction:   man.getConfigString("lambda.status_function"),
+			ResultFunction:   man.getConfigString("lambda.result_function"),
+			StsAssumeRoleArn: man.getConfigString("lambda.sts_assume_role_arn"),
 		},
 		S3: S3Config{
 			Bucket:           man.getConfigString("s3.bucket"),
@@ -615,6 +684,8 @@ func TestConfig() KolideConfig {
 		},
 		Osquery: OsqueryConfig{
 			NodeKeySize:          24,
+			HostIdentifier:       "instance",
+			EnrollCooldown:       42 * time.Minute,
 			StatusLogPlugin:      "filesystem",
 			ResultLogPlugin:      "filesystem",
 			LabelUpdateInterval:  1 * time.Hour,

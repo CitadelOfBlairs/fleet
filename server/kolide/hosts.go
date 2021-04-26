@@ -13,13 +13,10 @@ type HostStatus string
 const (
 	// StatusOnline host is active.
 	StatusOnline = HostStatus("online")
-
 	// StatusOffline no communication with host for OfflineDuration.
 	StatusOffline = HostStatus("offline")
-
 	// StatusMIA no communication with host for MIADuration.
 	StatusMIA = HostStatus("mia")
-
 	// StatusNew means the host has enrolled in the interval defined by
 	// NewDuration. It is independent of offline and online.
 	StatusNew = HostStatus("new")
@@ -28,7 +25,7 @@ const (
 	// considered new.
 	NewDuration = 24 * time.Hour
 
-	// OfflineDuration if a host hasn't been in communication for this period it
+	// MIADuration if a host hasn't been in communication for this period it
 	// is considered MIA.
 	MIADuration = 30 * 24 * time.Hour
 
@@ -36,12 +33,6 @@ const (
 	// online interval to avoid flapping of hosts that check in a bit later
 	// than their expected checkin interval.
 	OnlineIntervalBuffer = 30
-
-	// HostEnrollCooldown is how often a host can enroll. Users sometimes deploy
-	// osquery in a configuration in which multiple hosts use the same host
-	// identifier and Fleet needs to have a cooldown period to prevent this from
-	// cascading into out of control host enrollment.
-	HostEnrollCooldown = 1 * time.Minute
 )
 
 type HostStore interface {
@@ -53,8 +44,9 @@ type HostStore interface {
 	Host(id uint) (*Host, error)
 	// EnrollHost will enroll a new host with the given identifier, setting the
 	// node key, and enroll secret used for the host. Implementations of this
-	// method should respect HostEnrollCooldown.
-	EnrollHost(osqueryHostId, nodeKey, secretName string) (*Host, error)
+	// method should respect the provided host enrollment cooldown, by returning
+	// an error if the host has enrolled within the cooldown period.
+	EnrollHost(osqueryHostId, nodeKey, secretName string, cooldown time.Duration) (*Host, error)
 	ListHosts(opt HostListOptions) ([]*Host, error)
 	// AuthenticateHost authenticates and returns host metadata by node key.
 	// This method should not return the host "additional" information as this
@@ -62,6 +54,7 @@ type HostStore interface {
 	// endpoints.
 	AuthenticateHost(nodeKey string) (*Host, error)
 	MarkHostSeen(host *Host, t time.Time) error
+	MarkHostsSeen(hostIDs []uint, t time.Time) error
 	SearchHosts(query string, omit ...uint) ([]*Host, error)
 	// CleanupIncomingHosts deletes hosts that have enrolled but never
 	// updated their status details. This clears dead "incoming hosts" that
@@ -84,20 +77,27 @@ type HostStore interface {
 
 type HostService interface {
 	ListHosts(ctx context.Context, opt HostListOptions) (hosts []*Host, err error)
-	GetHost(ctx context.Context, id uint) (host *Host, err error)
+	GetHost(ctx context.Context, id uint) (host *HostDetail, err error)
 	GetHostSummary(ctx context.Context) (summary *HostSummary, err error)
 	DeleteHost(ctx context.Context, id uint) (err error)
 	// HostByIdentifier returns one host matching the provided identifier.
 	// Possible matches can be on osquery_host_identifier, node_key, UUID, or
 	// hostname.
-	HostByIdentifier(ctx context.Context, identifier string) (*Host, error)
+	HostByIdentifier(ctx context.Context, identifier string) (*HostDetail, error)
+
+	FlushSeenHosts(ctx context.Context) error
 }
 
 type HostListOptions struct {
 	ListOptions
 
+	// AdditionalFilters selects which host additional fields should be
+	// populated.
 	AdditionalFilters []string
-	StatusFilter      HostStatus
+	// StatusFilter selects the online status of the hosts.
+	StatusFilter HostStatus
+	// MatchQuery is the query string to match in various columns of the host.
+	MatchQuery string
 }
 
 type Host struct {
@@ -144,6 +144,16 @@ type Host struct {
 	LoggerTLSPeriod           uint                `json:"logger_tls_period" db:"logger_tls_period"`
 	Additional                *json.RawMessage    `json:"additional,omitempty" db:"additional"`
 	EnrollSecretName          string              `json:"enroll_secret_name" db:"enroll_secret_name"`
+}
+
+// HostDetail provides the full host metadata along with associated labels and
+// packs.
+type HostDetail struct {
+	Host
+	// Labels is the list of labels the host is a member of.
+	Labels []Label `json:"labels"`
+	// Packs is the list of packs the host is a member of.
+	Packs []Pack `json:"packs"`
 }
 
 const (

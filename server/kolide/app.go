@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/kolide/kit/version"
 )
 
 // AppConfigStore contains method for saving and retrieving
@@ -42,6 +44,9 @@ type AppConfigService interface {
 	// For cases where the connection is self-signed, the server will attempt to
 	// connect using the InsecureSkipVerify option in tls.Config.
 	CertificateChain(ctx context.Context) (cert []byte, err error)
+
+	// Version returns version and build information.
+	Version(ctx context.Context) (*version.Info, error)
 }
 
 // SMTP settings names returned from API, these map to SMTPAuthType and
@@ -144,6 +149,8 @@ type AppConfig struct {
 	IDPName string `db:"idp_name"`
 	// EnableSSO flag to determine whether or not to enable SSO
 	EnableSSO bool `db:"enable_sso"`
+	// EnableSSO flag to determine whether or not to enable SSO
+	EnableSSOIdPLogin bool `db:"enable_sso_idp_login"`
 	// FIMInterval defines the interval when file integrity checks will occur
 	FIMInterval int `db:"fim_interval"`
 	// FIMFileAccess defines the FIMSections which will be monitored for file access events as a JSON formatted array
@@ -193,6 +200,9 @@ type SSOSettingsPayload struct {
 	IDPName *string `json:"idp_name"`
 	// EnableSSO flag to determine whether or not to enable SSO
 	EnableSSO *bool `json:"enable_sso"`
+	// EnableSSOIdPLogin flag to determine whether or not to allow IdP-initiated
+	// login.
+	EnableSSOIdPLogin *bool `json:"enable_sso_idp_login"`
 }
 
 // SMTPSettingsPayload is part of the AppConfigPayload which defines the wire representation
@@ -241,7 +251,7 @@ type AppConfigPayload struct {
 	HostSettings       *HostSettings        `json:"host_settings"`
 	// SMTPTest is a flag that if set will cause the server to test email configuration
 	SMTPTest *bool `json:"smtp_test,omitempty"`
-	// SSOSettings single sign settings
+	// SSOSettings is single sign on settings
 	SSOSettings *SSOSettingsPayload `json:"sso_settings"`
 }
 

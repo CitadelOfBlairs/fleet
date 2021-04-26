@@ -6,8 +6,8 @@ import (
 	"html/template"
 	"time"
 
-	"github.com/go-kit/kit/endpoint"
 	"github.com/fleetdm/fleet/server/kolide"
+	"github.com/go-kit/kit/endpoint"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -223,12 +223,12 @@ func makeCallbackSSOEndpoint(svc kolide.Service, urlPrefix string) endpoint.Endp
 		}
 		relayStateLoadPage := ` <html>
      <script type='text/javascript'>
-     var redirectURL = {{.RedirectURL}};
-     window.localStorage.setItem('KOLIDE::auth_token', '{{.Token}}');
+     var redirectURL = {{ .RedirectURL }};
+     window.localStorage.setItem('KOLIDE::auth_token', '{{ .Token }}');
      window.location = redirectURL;
      </script>
      <body>
-     Redirecting to Kolide...
+     Redirecting to Fleet...
      </body>
      </html>
     `

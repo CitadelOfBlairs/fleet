@@ -31,7 +31,7 @@
     }
 
     input {
-      &[name='query-filter'] {
+      &[name="query-filter"] {
         width: 100%;
         margin-top: 24px;
       }
@@ -60,8 +60,7 @@
   }
 
   &__wrapper {
-    padding: 50px 30px;
-    min-height: 90vh;
+    padding: 40px 30px;
   }
 
   &__modal-btn-wrap {
@@ -82,11 +81,9 @@
   }
 
   &__empty-description {
-
     font-size: $small;
     font-style: italic;
     padding: 0 20px;
     margin: 0;
   }
 }
-

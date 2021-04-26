@@ -1,13 +1,9 @@
 {
-  "name": "osquery-fleetctl",
-  "version": "3.5.1",
+  "name": "fleetctl",
+  "version": "3.10.1",
   "description": "Installer for the fleetctl CLI tool",
-  "main": "binary.js",
   "bin": {
     "fleetctl": "./run.js"
-  },
-  "scripts": {
-    "postinstall": "node ./install.js"
   },
   "repository": {
     "type": "git",
@@ -20,7 +16,12 @@
   },
   "homepage": "https://fleetdm.com",
   "dependencies": {
-    "binary-install": "0.1.0"
+    "axios": "0.21.1",
+    "rimraf": "3.0.2",
+    "tar": "6.1.0"
   },
-  "keywords": ["osquery", "security"]
+  "keywords": [
+    "osquery",
+    "security"
+  ]
 }

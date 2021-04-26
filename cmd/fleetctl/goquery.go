@@ -11,7 +11,7 @@ import (
 	"github.com/fleetdm/fleet/server/kolide"
 	"github.com/fleetdm/fleet/server/service"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 type activeQuery struct {
@@ -110,14 +110,15 @@ func (c *goqueryClient) FetchResults(queryName string) (gqmodels.Rows, string, e
 	return res.results, res.status, nil
 }
 
-func goqueryCommand() cli.Command {
-	return cli.Command{
+func goqueryCommand() *cli.Command {
+	return &cli.Command{
 		Name:  "goquery",
 		Usage: "Start the goquery interface",
 		Flags: []cli.Flag{
 			configFlag(),
 			contextFlag(),
 			yamlFlag(),
+			debugFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			fleet, err := clientFromCLI(c)

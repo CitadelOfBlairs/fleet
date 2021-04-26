@@ -1,11 +1,13 @@
 .manage-hosts {
-  min-height: 90vh;
-
   .header-wrap {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 16px;
+  }
+
+  .ace-kolide {
+    margin-bottom: $pad-base;
   }
 
   &__header {
@@ -36,14 +38,9 @@
     .kolidecon-mia {
       color: $core-black;
     }
-
-    .kolidecon-clock {
-      color: $warning;
-    }
   }
 
   &__label-actions {
-
     button {
       &:first-child {
         margin-right: 12px;
@@ -69,33 +66,6 @@
     }
   }
 
-  &__topper {
-    display: flex;
-    align-items: flex-end;
-  }
-
-  &__host-count {
-    font-size: $x-small;
-    font-weight: $bold;
-    color: $core-black;
-    margin: 0;
-  }
-
-  &__modal {
-    p {
-      font-size: 16px;
-    }
-  }
-
-  &__modal-buttons {
-    display: flex;
-    flex-direction: row-reverse;
-
-    .button--alert {
-      margin-left: 15px;
-    }
-  }
-
   &__toggle-view {
     .kolidecon {
       width: 24px;
@@ -108,6 +78,16 @@
       .kolidecon {
         fill: $core-purple;
       }
+    }
+  }
+
+  &__modal-buttons {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+
+    .button:first-child {
+      margin-right: $pad-base;
     }
   }
 }

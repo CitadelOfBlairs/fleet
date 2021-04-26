@@ -1,27 +1,27 @@
-import createRequestMock from 'test/mocks/create_request_mock';
-import { packStub } from 'test/stubs';
+import createRequestMock from "test/mocks/create_request_mock";
+import { packStub } from "test/stubs";
 
 export default {
   addLabel: {
     valid: (bearerToken, packID, labelID) => {
-      const endpoint = `/api/v1/kolide/packs/${packID}/labels/${labelID}`;
+      const endpoint = `/api/v1/fleet/packs/${packID}/labels/${labelID}`;
 
       return createRequestMock({
         bearerToken,
         endpoint,
-        method: 'post',
+        method: "post",
         response: { pack: packStub },
       });
     },
   },
   addQuery: {
     valid: (bearerToken, packID, queryID) => {
-      const endpoint = `/api/v1/kolide/packs/${packID}/queries/${queryID}`;
+      const endpoint = `/api/v1/fleet/packs/${packID}/queries/${queryID}`;
 
       return createRequestMock({
         bearerToken,
         endpoint,
-        method: 'post',
+        method: "post",
         response: { pack: packStub },
       });
     },
@@ -30,9 +30,9 @@ export default {
     valid: (bearerToken, params) => {
       return createRequestMock({
         bearerToken,
-        endpoint: '/api/v1/kolide/packs',
+        endpoint: "/api/v1/fleet/packs",
         params,
-        method: 'post',
+        method: "post",
         response: { pack: params },
         responseStatus: 201,
       });
@@ -42,8 +42,8 @@ export default {
     valid: (bearerToken, pack) => {
       return createRequestMock({
         bearerToken,
-        endpoint: `/api/v1/kolide/packs/id/${pack.id}`,
-        method: 'delete',
+        endpoint: `/api/v1/fleet/packs/id/${pack.id}`,
+        method: "delete",
         response: {},
       });
     },
@@ -52,8 +52,8 @@ export default {
     valid: (bearerToken, pack, params) => {
       return createRequestMock({
         bearerToken,
-        endpoint: `/api/v1/kolide/packs/${pack.id}`,
-        method: 'patch',
+        endpoint: `/api/v1/fleet/packs/${pack.id}`,
+        method: "patch",
         params,
         response: { pack: { ...pack, ...params } },
       });

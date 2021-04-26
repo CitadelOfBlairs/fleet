@@ -1,12 +1,15 @@
-import BaseConfig from 'redux/nodes/entities/base/base_config';
-import { entitiesExceptID } from 'redux/nodes/entities/base/helpers';
+import BaseConfig from "redux/nodes/entities/base/base_config";
+import {
+  entitiesExceptID,
+  orderExceptId,
+} from "redux/nodes/entities/base/helpers";
 
 class ReduxConfig extends BaseConfig {
-  get actions () {
+  get actions() {
     return this.allActions();
   }
 
-  get reducer () {
+  get reducer() {
     const { actionTypes, entityName } = this;
 
     return (state = BaseConfig.initialState, { type, payload }) => {
@@ -30,6 +33,7 @@ class ReduxConfig extends BaseConfig {
             ...state,
             loading: false,
             errors: {},
+            originalOrder: payload.originalOrder,
             data: {
               ...payload.data[entityName],
             },
@@ -41,6 +45,7 @@ class ReduxConfig extends BaseConfig {
             ...state,
             loading: false,
             errors: {},
+            originalOrder: payload.originalOrder,
             data: {
               ...state.data,
               ...payload.data[entityName],
@@ -54,6 +59,7 @@ class ReduxConfig extends BaseConfig {
             data: {
               ...entitiesExceptID(state.data, payload.data),
             },
+            originalOrder: orderExceptId(state.originalOrder, payload.data),
           };
         }
         case actionTypes.CREATE_FAILURE:
